@@ -69,7 +69,7 @@ cd /var/lib/libvirt/packer
 # create patch file
 cat > /tmp/packer.diff<<'EOT'
 diff --git a/win2022-gui.json b/win2022-gui.json
-index 5041d00..3111a27 100644
+index 5041d00..d9216a3 100644
 --- a/win2022-gui.json
 +++ b/win2022-gui.json
 @@ -84,6 +84,7 @@
@@ -80,7 +80,14 @@ index 5041d00..3111a27 100644
              "qemuargs": [ [ "-cdrom", "{{user `virtio_iso_path`}}" ] ],
              "floppy_files": ["scripts/bios/gui/autounattend.xml"],
              "shutdown_command": "shutdown /s /t 5 /f /d p:4:1 /c \"Packer Shutdown\"",
-@@ -123,6 +124,10 @@
+@@ -117,12 +118,16 @@
+         },
+         {
+             "type": "windows-restart",
+-            "restart_timeout": "30m"
++            "restart_timeout": "180m"
+         },
+         {
              "type": "powershell",
              "scripts": ["scripts/win-update.ps1"]
          },
