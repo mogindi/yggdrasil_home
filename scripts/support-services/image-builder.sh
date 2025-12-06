@@ -66,49 +66,14 @@ apt update && apt install packer
 mkdir -p /var/lib/libvirt/packer
 cd /var/lib/libvirt/packer
 
-# create patch file
-cat > /tmp/packer.diff<<'EOT'
-diff --git a/win2022-gui.json b/win2022-gui.json
-index 5041d00..d9216a3 100644
---- a/win2022-gui.json
-+++ b/win2022-gui.json
-@@ -84,6 +84,7 @@
-             "winrm_use_ssl": true,
-             "winrm_insecure": true,
-             "winrm_timeout": "4h",
-+            "vnc_bind_address": "0.0.0.0",
-             "qemuargs": [ [ "-cdrom", "{{user `virtio_iso_path`}}" ] ],
-             "floppy_files": ["scripts/bios/gui/autounattend.xml"],
-             "shutdown_command": "shutdown /s /t 5 /f /d p:4:1 /c \"Packer Shutdown\"",
-@@ -117,12 +118,16 @@
-         },
-         {
-             "type": "windows-restart",
--            "restart_timeout": "30m"
-+            "restart_timeout": "180m"
-         },
-         {
-             "type": "powershell",
-             "scripts": ["scripts/win-update.ps1"]
-         },
-+        {
-+            "type": "powershell",
-+            "scripts": ["scripts/custom.ps1"]
-+        },
-         {
-             "type": "windows-restart",
-             "restart_timeout": "30m"
-EOT
-
 # windows
 git clone https://github.com/eaksel/packer-Win2022.git
 
+# TODO: Get this working
 # ubuntu
 git clone https://github.com/rlaun/packer-ubuntu-22.04/
-# TODO: Get this working
 
 cd packer-Win2022
-
 
 cat > scripts/custom.ps1<<'EOT'
 # Qemu agent
@@ -132,11 +97,86 @@ Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\'
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 EOT
 
-# apply patch
-git apply /tmp/packer.diff
-
-# download virtio iso
-wget -q https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.229-1/virtio-win-0.1.229.iso
+cat > win2022-gui.json <<'EOT'
+{
+    "variables": {
+        "boot_wait": "5s",
+        "disk_size": "40960",
+        "iso_checksum": "4f1457c4fe14ce48c9b2324924f33ca4f0470475e6da851b39ccbf98f44e7852",
+        "iso_url": "https://software-download.microsoft.com/download/sg/20348.169.210806-2348.fe_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "memsize": "2048",
+        "numvcpus": "2",
+        "vm_name": "Win2022_20324",
+        "winrm_password" : "packer",
+        "winrm_username" : "Administrator",
+        "virtio_iso_path" : "virtio-win-0.1.229.iso"
+    },
+    "builders": [
+        {
+            "type": "qemu",
+            "machine_type": "q35",
+            "memory": "{{user `memsize`}}",
+            "cpus": "{{user `numvcpus`}}",
+            "vm_name": "{{user `vm_name`}}.qcow2",
+            "iso_url": "{{user `iso_url`}}",
+            "iso_checksum": "{{user `iso_checksum`}}",
+            "headless": true,
+            "boot_wait": "{{user `boot_wait`}}",
+            "disk_size": "{{user `disk_size`}}",
+            "disk_interface": "virtio-scsi",
+            "disk_discard": "unmap",
+            "disk_detect_zeroes": "unmap",
+            "format": "qcow2",
+            "communicator":"winrm",
+            "winrm_username": "{{user `winrm_username`}}",
+            "winrm_password": "{{user `winrm_password`}}",
+            "winrm_use_ssl": true,
+            "winrm_insecure": true,
+            "winrm_timeout": "4h",
+            "vnc_bind_address": "0.0.0.0",
+            "qemuargs": [ [ "-cdrom", "{{user `virtio_iso_path`}}" ] ],
+            "floppy_files": ["scripts/bios/gui/autounattend.xml"],
+            "shutdown_command": "shutdown /s /t 5 /f /d p:4:1 /c \"Packer Shutdown\"",
+            "shutdown_timeout": "30m"
+        }
+    ],
+    "provisioners": [
+        {
+            "type": "powershell",
+            "scripts": ["scripts/setup.ps1"]
+        },
+        {
+            "type": "windows-restart",
+            "restart_timeout": "180m"
+        },
+        {
+            "type": "powershell",
+            "scripts": ["scripts/win-update.ps1"]
+        },
+        {
+            "type": "windows-restart",
+            "restart_timeout": "180m"
+        },
+        {
+            "type": "powershell",
+            "scripts": ["scripts/win-update.ps1"]
+        },
+        {
+            "type": "powershell",
+            "scripts": ["scripts/custom.ps1"]
+        },
+        {
+            "type": "windows-restart",
+            "restart_timeout": "180m"
+        },
+        {
+            "type": "powershell",
+            "scripts": ["scripts/cleanup.ps1"],
+            "pause_before": "1m"
+        }
+    ]
+}
+EOT
 
 # plugin config
 cat > template.pkr.hcl <<EOT
@@ -149,6 +189,10 @@ packer {
   }
 }
 EOT
+
+
+# download virtio iso
+wget -q https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.229-1/virtio-win-0.1.229.iso
 
 export HOME=/root
 
@@ -169,8 +213,8 @@ openstack server show $vm_name || openstack server create \
     --user-data /tmp/user_data.sh \
     $vm_name
 
-
-if [[ -z $(openstack floating ip list | grep $(openstack port list --server $vm_name -f value -c id) ) ]]; then
+fip=$(openstack floating ip list -f value | grep $(openstack port list --server $vm_name -f value -c id) | awk '{print $2}')
+if [[ -z $fip ]]; then
   fip=$(openstack floating ip list -f value | grep "None None" | head -n 1 | awk '{print $2}')
   if [[ -z $fip ]]; then
     fip=$(openstack floating ip create public1 -f value -c floating_ip_address)
@@ -188,12 +232,12 @@ ssh-keygen -f "/root/.ssh/known_hosts" -R $fip
 sleep 300
 ssh_cmd="sshpass -p ubuntu ssh -o StrictHostKeyChecking=no ubuntu@$fip"
 $ssh_cmd 'while ! ls -d /var/lib/libvirt/packer/packer-Win2022; do echo "==> Packer repo not cloned yet.. waiting"; sleep 120; done'
-$ssh_cmd 'echo ==> Packer repo exists'
+$ssh_cmd 'echo "==> Packer repo exists"'
 $ssh_cmd 'while ! sudo pstree | grep -q qemu-system; do echo "==> VM not started yet.. waiting"; sleep 120; done'
-$ssh_cmd 'echo ==> VM exists'
+$ssh_cmd 'echo "==> VM exists"'
 $ssh_cmd 'echo "==> Ports available:"; sudo ss -lnp4 | grep qemu-system'
 $ssh_cmd 'while sudo pstree | grep -q qemu-system; do echo "==> VM still running.. waiting"; sleep 300; done'
-$ssh_cmd 'echo ==> VM is now off!'
-$ssh_cmd 'echo ====== COMPLETE ======'
-$ssh_cmd 'echo QCOW image should now be ready!'
+$ssh_cmd 'echo "==> VM is now off!"'
+$ssh_cmd 'echo "====== COMPLETE ======"'
+$ssh_cmd 'echo "QCOW image should now be ready!"'
 
