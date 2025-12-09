@@ -98,7 +98,7 @@ fi
 
 openstack image create --public \
   --property os_distro=windows --property os_type=windows --property os_version=s2022 \
-  --property os_admin_user=Administrator \
-  --file /mnt/winshare/Win2022_20241024.raw \
+  --property os_admin_user=Administrator --property hw_qemu_guest_agent=yes \
+  --file /mnt/winshare/Win2022_20251209.raw \
   --progress \
-  Win2022_20241024
+  Win2022_20251209
