@@ -10,7 +10,12 @@ source kolla-venv/bin/activate
 
 # install kolla-ansible
 rm -rf kolla-ansible
-git clone --branch stable/$OPENSTACK_RELEASE https://github.com/openstack/kolla-ansible.git
+
+BRANCH=stable/$OPENSTACK_RELEASE
+if [[ $OPENSTACK_RELEASE == '2024.1' ]]; then
+	BRANCH=unmaintained/2024.1
+fi
+git clone --branch $BRANCH https://github.com/openstack/kolla-ansible.git
 
 # apply patch and setup
 cd kolla-ansible

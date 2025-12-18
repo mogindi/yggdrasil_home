@@ -96,9 +96,10 @@ if ! mount | grep -q /mnt/winshare; then
   mount.cifs -o user=u429780,pass=$pass //u429780.your-storagebox.de/backup /mnt/winshare/
 fi
 
-openstack image create --public \
+image_name=Win2022_20251209
+openstack image show $image_name || openstack image create --public \
   --property os_distro=windows --property os_type=windows --property os_version=s2022 \
   --property os_admin_user=Administrator --property hw_qemu_guest_agent=yes \
-  --file /mnt/winshare/Win2022_20251209.raw \
+  --file /mnt/winshare/$image_name.raw \
   --progress \
-  Win2022_20251209
+  $image_name
