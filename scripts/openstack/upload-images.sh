@@ -90,6 +90,9 @@ openstack image set --public \
   --property os_admin_user=root \
   fedora-coreos-38.20230806.3.0-openstack.x86_64
 
+sudo apt remove unattended-upgrades -y
+apt install cifs-utils -y
+
 pass=$(cat ~/hetzner-storagebox.pass)
 if ! mount | grep -q /mnt/winshare; then
   mkdir -p /mnt/winshare

@@ -55,7 +55,6 @@ cat << 'EOT' > ~/.ssh/rc
 #!/bin/bash
 latest_ssh_auth_sock=\$(ls -dt /tmp/ssh-*/agent* | head -n 1)
 ln -sf \$latest_ssh_auth_sock ~/.ssh/ssh_auth_sock
-echo Updating ~/.ssh/ssh_auth_sock to point to \$latest_ssh_auth_sock
 EOT
 sed -i 's/.*PermitUserEnvironment.*/PermitUserEnvironment yes/g' /etc/ssh/sshd_config
 systemctl restart ssh
