@@ -15,8 +15,11 @@ prepare-ansible:
 	ln -sfr ansible/inventory/$(ENV) /etc/ansible/hosts
 	ln -sfr ansible/ansible.cfg /etc/ansible/ansible.cfg
 
-harden: prepare-ansible
+harden:
 	ansible-playbook ansible/harden.yml $(ARGS)
+
+vpn: 
+	ansible-playbook ansible/vpn.yml $(ARGS)
 
 devices-configure:
 	ansible-playbook ansible/devices.yml $(ARGS)

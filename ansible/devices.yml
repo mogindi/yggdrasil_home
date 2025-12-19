@@ -147,6 +147,7 @@
       script: "{{ playbook_dir }}/../scripts/devices/masquerade.sh"
       when: network_masquerade_vlans
 
+    # DO WE REALLY NEED THIS, IF WE USE VPN?
     - name: Configure network routes on deployment controller
       script: "{{ playbook_dir }}/../scripts/devices/configure_routes.sh"
       environment:
@@ -155,9 +156,21 @@
         NETWORK_PROVIDER_NET: "{{ network_provider_gateway_ip | ansible.netcommon.ipaddr('network/prefix') }}"
         NETWORK_PRIMARY_GATEWAY_IP: "{{ network_primary_gateway_ip | ansible.netcommon.ipaddr('address') }}"
         NETWORK_PROVIDER_GATEWAY_IP: "{{ network_provider_gateway_ip | ansible.netcommon.ipaddr('address') }}"
-      when: network_add_routes_to_deployment_controller
+      when: network_add_routes_to_deployment_controller | default(false)
       delegate_to: "{{ groups['deployment_controller'][0] }}"
       run_once: true
+
+    # we might not need this for openstack at all, but just in case
+    - name: Configure additional route tables
+      script: "{{ playbook_dir }}/../scripts/devices/create-route-table.sh"    
+      environment:
+        table: "{{ item.table }}"
+        network_cidr: "{{ item.network_cidr }}"
+        gw: "{{ item.gateway }}"
+        if: "{{ item.interface }}"
+        vlan: "{{ item.vlan }}"
+        tmp_ip: "{{ temp_ip | default('') }}"  # This is hacky and perhaps useless?
+      loop: "{{ network_extra_route_tables | default([]) }}"
 
     - name: Create cni directory for Zun
       command: mkdir -p /opt/cni/bin/
