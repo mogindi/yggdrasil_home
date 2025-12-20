@@ -82,7 +82,7 @@
 
     - name: deploy peervpn container
       command: |
-        docker run -d --device=/dev/net/tun --cap-add=NET_ADMIN --cpu-shares=4096 --net=host \
+        docker run -d --device=/dev/net/tun --cap-add=NET_ADMIN --cpu-shares=8192 --net=host \
           -e VPN_IP={{ vpn_ip | ansible.netcommon.ipaddr('address') }} \
           -e VPN_CIDR={{ vpn_ip | ansible.netcommon.ipaddr('prefix') }} \
           -e VPN_PORT={{ vpn_port }} \
