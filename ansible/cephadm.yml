@@ -157,7 +157,7 @@
         creates: /root/cephadm_pools.done
       run_once: true
 
-      # need default 8443 on node for nova console proxy.
+      # need default 8443 on node for nova console proxy. Only possibility on the same dns host if ur using cloudflare
     - name: Change mgr dashboard port
       shell: |
         ceph config set mgr mgr/dashboard/ssl_server_port 8444 && docker ps --format '{{ .Names }}' | grep ceph | grep mgr- | xargs docker restart
