@@ -25,7 +25,7 @@ openstack datastore version show --datastore postgresql 12.18 || openstack datas
 
 suffix=$RANDOM
 openstack database instance create postgresql_instance_$suffix \
-    --flavor ds2G \
+    --flavor m1.medium \
     --size 5 \
     --nic net-id=$(openstack network show demo-net -f value -c id) \
     --databases test --users userA:password \

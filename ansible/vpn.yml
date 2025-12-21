@@ -36,6 +36,7 @@
         dest: /etc/docker/daemon.json
         content: |
           {
+            "ip-forward-no-drop": true,
             "live-restore": true
           }
       when: not docker_daemon_json.stat.exists

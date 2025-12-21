@@ -54,7 +54,7 @@
         OPENSTACK_DESIGNATE_FORWARDERS_SECOND_ADDRESS: "{{ openstack_designate_forwarders_second_address }}"
         OPENSTACK_CEPH_RGW_HOSTS: "{{ openstack_ceph_rgw_hosts }}"
         OPENSTACK_WORKER_COUNT: "{{ openstack_worker_count }}"
-        OPENSTACK_AMPHORA_SUBNET_CIDR: "{{ openstack_amphora_subnet_cidr }}"
+        OPENSTACK_AMPHORA_SUBNET_CIDR: "{{ openstack_amphora_network.cidr }}"
 
     - name: Run kolla-ansible
       debug:

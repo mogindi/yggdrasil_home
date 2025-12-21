@@ -50,12 +50,9 @@
         # set gateway on octavia management subnet
         openstack subnet set --gateway {{ openstack_amphora_network.gateway_ip }} lb-mgmt-subnet
 
-        # create another (internal) provider subnet to connect to octavia subnet
-        openstack subnet show lb-mgmt-provider-subnet || openstack subnet create --no-dhcp --allocation-pool start={{ openstack_octavia_provider_network.allocation_start }},end={{ openstack_octavia_provider_network.allocation_end }} --network public1 --subnet-range {{ openstack_octavia_provider_network.cidr }} lb-mgmt-provider-subnet
-
         # create router and to make it reachable from octavia worker
         openstack router show lb-mgmt-router || (openstack router create lb-mgmt-router && openstack router add subnet lb-mgmt-router lb-mgmt-subnet)
-        openstack router set --disable-snat --external-gateway public1 --fixed-ip subnet=lb-mgmt-provider-subnet,ip-address=$lb_mgmt_router_external_gatway_ip lb-mgmt-router
+        openstack router set --disable-snat --external-gateway public1 --fixed-ip subnet=public1-subnet,ip-address=$lb_mgmt_router_external_gatway_ip lb-mgmt-router
       args:
         chdir: "{{ playbook_dir }}/../.."
         executable: /bin/bash

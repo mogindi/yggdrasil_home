@@ -123,6 +123,15 @@
       loop: "{{ groups['deployment_nodes'] }}"
       when: cephadm_bootstrap.changed
 
+    - name: Get number osds present
+      shell: ceph osd tree | grep osd. | wc -l
+      register: ceph_osd_count
+
+    - name: Calculate expected osd devices
+      set_fact:
+        expected_osd_devices: "{{ (expected_osd_device | default(0) | int) + (hostvars[item].storage_ceph_osd_devices | length) }}"
+      loop: "{{ groups['deployment_nodes'] }}"
+
     - name: Add osds
       shell: |
         set -e
@@ -130,6 +139,7 @@
           ceph orch daemon add osd {{ item }}:{{ device }}
         {% endfor %}
       loop: "{{ groups['deployment_nodes'] }}"
+      when: (ceph_osd_count.stdout | int) < (expected_osd_devices | int)
 
     - name: Create rgw config file
       copy:
@@ -160,7 +170,7 @@
       # need default 8443 on node for nova console proxy. Only possibility on the same dns host if ur using cloudflare
     - name: Change mgr dashboard port
       shell: |
-        ceph config set mgr mgr/dashboard/ssl_server_port 8444 && docker ps --format '{{ .Names }}' | grep ceph | grep mgr- | xargs docker restart
+        {% raw %}ceph config set mgr mgr/dashboard/ssl_server_port 8444 && docker ps --format '{{ .Names }}' | grep ceph | grep mgr- | xargs docker restart{% endraw %}
 
 - name: Destroy cephadm cluster
   hosts: deployment_nodes[0]

@@ -154,6 +154,44 @@
       script: "{{ playbook_dir }}/../scripts/devices/masquerade.sh"
       when: network_masquerade_vlans
 
+    # # we might not need this for openstack at all, but just in case
+    # - name: Configure additional route tables
+    #   script: "{{ playbook_dir }}/../scripts/devices/create-route-table.sh"    
+    #   environment:
+    #     table: "{{ item.table }}"
+    #     network_cidr: "{{ item.network_cidr }}"
+    #     routes: "{% for route in item.routes %}{{ route }}{% if not loop.last %};{% endif %}{% endfor %}"
+    #   loop: "{{ network_extra_route_tables | default([]) }}"
+
+    - name: Configure additional route tables
+      environment:
+        table: "{{ item.table }}"
+        network_cidr: "{{ item.network_cidr }}"
+      shell: |
+        cat > /etc/systemd/system/network_create_route_table_$table.service <<EOF
+        [Unit]
+        Description=Network route table $table for $network_cidr
+        After=network.target
+
+        [Service]
+        ExecStart=/bin/bash -c "grep -q \"1 $table\" /etc/iproute2/rt_tables || ( echo \"1 $table\" | tee -a /etc/iproute2/rt_tables )"
+        ExecStart=/bin/bash -c "ip rule add from $network_cidr lookup $table"
+        ExecStart=/bin/bash -c "ip rule add to $network_cidr lookup $table"
+        {% for route in item.routes %}
+        ExecStart=/bin/bash -c "ip route add {{ route }} table $table"
+        {% endfor %}
+        Type=oneshot
+
+        [Install]
+        WantedBy=default.target
+        RequiredBy=network.target
+        EOF
+
+        systemctl daemon-reload
+        systemctl restart network_create_route_table_$table.service
+        systemctl enable network_create_route_table_$table.service
+      loop: "{{ network_extra_route_tables | default([]) }}"
+
     # DO WE REALLY NEED THIS, IF WE USE VPN?
     - name: Configure network routes on deployment controller
       script: "{{ playbook_dir }}/../scripts/devices/configure_routes.sh"
@@ -166,17 +204,6 @@
       when: network_add_routes_to_deployment_controller | default(false)
       delegate_to: "{{ groups['deployment_controller'][0] }}"
       run_once: true
-
-    # we might not need this for openstack at all, but just in case
-    - name: Configure additional route tables
-      script: "{{ playbook_dir }}/../scripts/devices/create-route-table.sh"    
-      environment:
-        table: "{{ item.table }}"
-        network_cidr: "{{ item.network_cidr }}"
-        gw: "{{ item.gateway }}"
-        if: "{{ item.interface }}"
-        vlan: "{{ item.vlan }}"
-      loop: "{{ network_extra_route_tables | default([]) }}"
 
     - name: Create cni directory for Zun
       command: mkdir -p /opt/cni/bin/
