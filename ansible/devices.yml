@@ -157,6 +157,24 @@
       script: "{{ playbook_dir }}/../scripts/devices/masquerade.sh"
       when: network_masquerade_vlans
 
+    - name: Set performance cpu governor 
+      shell: |
+        cat > /etc/systemd/system/yggdrasil_cpu_performance_governor.service <<EOF
+        [Unit]
+        Description=Set performance cpu governor
+
+        [Service]
+        ExecStart=/bin/bash -c "echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"
+        Type=oneshot
+
+        [Install]
+        WantedBy=default.target
+        EOF
+
+        systemctl daemon-reload
+        systemctl restart yggdrasil_cpu_performance_governor.service
+        systemctl enable yggdrasil_cpu_performance_governor.service
+
     - name: Configure additional routes in main routing table
       shell: |
         cat > /etc/systemd/system/network_create_routes.service <<EOF
