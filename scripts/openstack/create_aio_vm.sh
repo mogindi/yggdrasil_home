@@ -32,8 +32,6 @@ nsg=aio_nsg
 openstack security group show $nsg || openstack security group create $nsg
 openstack security group rule create $nsg --protocol tcp --dst-port 22 || true
 openstack security group rule create $nsg --protocol icmp || true  # TODO: remove
-openstack security group rule create $nsg --protocol tcp || true  # TODO: remove
-openstack security group rule create $nsg --protocol udp || true  # TODO: remove
 
 # Flavor
 
