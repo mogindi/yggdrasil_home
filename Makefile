@@ -108,20 +108,21 @@ infra-up: harden vpn devices-configure checks cephadm-deploy
 
 kollaansible-up: kollaansible-images kollaansible-prepare kollaansible-create-certs kollaansible-bootstrap kollaansible-prechecks kollaansible-deploy kollaansible-lma
 
-all-up: infra-up kollaansible-up
+postdeploy: kollaansible-postdeploy openstack-client-install openstack-resources-init openstack-images-upload symlink-etc-kolla  openstack-services
+
+all-up: infra-up kollaansible-up postdeploy
+
+all-upgrade: kollaansible-upgrade
 
 dev-up: vagrant-up all-up all-postdeploy
 
 dev-down: vagrant-destroy
-
-all-upgrade: kollaansible-upgrade
 
 openstack-services:
 	ls ~/.ssh/id_rsa.pub || ssh-keygen -b 2048 -t rsa -f ~/.ssh/id_rsa -q -N ""
 	$(MAKE) -j 5 -Oline openstack-octavia openstack-rgw openstack-magnum  openstack-manila openstack-trove-postgres
 	$(MAKE) openstack-remove-test-resources
 
-all-postdeploy: kollaansible-postdeploy openstack-client-install openstack-resources-init openstack-images-upload symlink-etc-kolla  openstack-services
 
 ########
 # Util #
