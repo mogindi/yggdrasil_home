@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 server=$1
 
 if [[ -z $server ]]; then
@@ -10,29 +12,26 @@ elif ! grep -q $server ~/.ssh/config; then
   exit 1
 fi
 
-
-# user is only initial user to connection
-if [[ $server =~ ovh ]]; then
-  user=ubuntu
-elif [[ $server =~ hetzner ]]; then
+# initial user
+user=$2
+if [[ -z $user ]]; then
   user=root
 fi
 
-
-
 additional_keys_segment="
-ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC2ChoqYodykOqMHA6JX4b2B9HZGdbTHpshh3Djt7dYAv1PuVNOaJSm7k65pGppRduvx5BeUhOJV73g9Jar4hHb9sbDYyG2eR0knalOqwfyOOEE2WmVy2FXjxXiC3yPDpPh5JyysQ9Y7PRjYdvjHVlV/aFSqbYrYULZQRw0UkLbObu6y/eUQfg26UmeSYax7CUn4YDWe2Nko+XzlR1gH7Vmj1DzlTMdNdRGAoC0w86OQR4gGQfnDLpoWM8k5rOuNvZHW19hF+d6l0avAfUjoGhConuevjA9KMopLmIEHTnpSXTdOsBeaVpKToIjbToNIgTZTVMOrFv+YbP/2fricElr EXT.mohamed.el.gindi@W-PC2319M5
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDvHbFftgNosvB4n5OW/OgTllzMK3jPNmC0G6Z1L9kDhT25eLqLk1/bKPUEkRxQdr+hVXNWMLJACzFEeDWhkA1dhz1+GP6FErL81+cW4thC0PfwHnT6ZxmUvBrWvSMqCv8l3sNSSKb9JWXzWu8jRApA1wB9Y4OWIQceADGnAVTq1AhOTweHL2/oZP/2gqyIb57g2YccDVjARgFCUX01AidmNRyG1N3/rMdBKcyJnMQVVjfp+LNlHnYRMVUGwKtBkrjvI6nMoxuqwb599tk7+m9rF4phSEJ12+mVogservCbnTQmDVnEwYnhlA4oUBCjIrL1YmbeKVihgcpZFjdhTNDa/jqzcxI2JW4EQdjPtUxKLd/kzoLASpLKzD+6QqfwpJnep2tcOvtziZO8gCWCkhh70+oUx6uIVe2vl2br+YarwU1B7A3dNz9fv4U0D8tFxwQZbFvQLHdgfjnAAanuk1qlVYyAIBupyaYuHKbJS/h1OGrYDlihDhHFJHRy0x9cqqc= mogindi@MO-SHINOBEE-1
 "
 
 > ~/.ssh/known_hosts
 ssh-copy-id -o "StrictHostKeyChecking=no" $user@$server
 echo "adding extra keys"
-ssh $user@$server "echo \"$additional_keys_segment\" | tee -a ~/.ssh/authorized_keys"
+ssh $user@$server "echo \"$additional_keys_segment\" | xargs -I% grep -q % ~/.ssh/authorized_keys || echo \"$additional_keys_segment\" | tee -a ~/.ssh/authorized_keys"
+echo "generating key"
+ssh $user@$server 'ls ~/.ssh/id_rsa.pub || ssh-keygen -b 2048 -t rsa -f ~/.ssh/id_rsa -q -N ""'
 echo "adding local key"
-ssh $user@$server "cat ~/.ssh/id_rsa.pub | tee -a ~/.ssh/authorized_keys"
-echo "copying authorized keys to root"
-ssh $user@$server 'sudo cp ~/.ssh/authorized_keys /root/.ssh/authorized_keys'
-
+ssh $user@$server "cat ~/.ssh/id_rsa.pub | xargs -I% grep -q % ~/.ssh/authorized_keys || cat ~/.ssh/id_rsa.pub | tee -a ~/.ssh/authorized_keys"
+echo "moving .ssh folder to root"
+ssh $user@$server 'sudo rm -rf /root/.ssh/ && sudo cp -r ~/.ssh/ /root/ && sudo chown root:root -R /root/.ssh/'
 
 ssh $server bash -s <<EOF
 set -x

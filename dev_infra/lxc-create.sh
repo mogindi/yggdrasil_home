@@ -12,7 +12,7 @@ networks:
   project: default
 storage_pools:
 - config:
-    size: 30GiB
+    size: 60GiB
   description: ""
   name: default
   driver: zfs
@@ -34,4 +34,4 @@ projects: []
 cluster: null
 EOF
 
-lxc launch --vm ubuntu:jammy aio
+lxc launch --vm --config limits.cpu=4 --config limits.memory=32GB ubuntu:jammy aio
