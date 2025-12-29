@@ -34,17 +34,18 @@
 
     - name: deploy peervpn container
       command: |
-        docker run -d --device=/dev/net/tun --cap-add=NET_ADMIN --cpu-shares=8192 --net=host \
+        docker run -d \
+          --device=/dev/net/tun --cap-add=NET_ADMIN --cpu-shares=8192 --net=host \
           -e VPN_IP={{ vpn_ip | ansible.netcommon.ipaddr('address') }} \
           -e VPN_CIDR={{ vpn_ip | ansible.netcommon.ipaddr('prefix') }} \
           -e VPN_PORT={{ vpn_port }} \
-          -e VPN_INTERFACE=vpn0
+          -e VPN_INTERFACE={{ vpn_interface }} \
           -e VPN_KEY={{ hostvars[groups['deployment_nodes'][0]].vpn_key }} \
           {% if vpn_peers is defined and vpn_peers | length > 0 %}
           -e VPN_PEERS="{% for peer in vpn_peers %}{{ peer + ':' + (vpn_port | string) }} {% endfor %}" \
           {% endif %}
-          --name peervpn
-          --restart always
+          --name peervpn \
+          --restart always \
           thedrhax/peervpn
       when: docker_ps_peervpn.rc != 0
 
