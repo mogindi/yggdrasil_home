@@ -42,7 +42,7 @@ rules=(
   "\-A INPUT -s $VPN_NET -j ACCEPT -m comment --comment 'allow vpn network'"
   "\-A INPUT -p tcp --dport 443 -m state --state NEW --syn -m hashlimit --hashlimit 15/s --hashlimit-burst 30 --hashlimit-mode srcip --hashlimit-srcmask 32 --hashlimit-name synattack -j ACCEPT -m comment --comment 'limit new syn connections to port 443 (yggdrasil console)'"
   "\-A INPUT -p tcp --dport 8443 -j ACCEPT -m comment --comment 'allow nova console access'"
-  "\-A INPUT -i lxdbr0 -j ACCEPT" -m comment --comment 'allow lxd bridge traffic for dev vms'"
+  "\-A INPUT -i lxdbr0 -j ACCEPT -m comment --comment 'allow lxd bridge traffic for dev vms'"
 )
 
 
