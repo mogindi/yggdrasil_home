@@ -62,6 +62,7 @@
           - containerd.io
           - docker-buildx-plugin
           - docker-compose-plugin
+        update_cache: true
       register: docker_installed
 
     - name: Ensure docker service is started and enabled
