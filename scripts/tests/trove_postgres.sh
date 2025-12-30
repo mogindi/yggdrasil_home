@@ -37,6 +37,8 @@ openstack database instance create postgresql_instance_$suffix \
 
 sleep 60
 
+set +x
+
 timeout_seconds=300
 sleep_time=5
 ready_status=ACTIVE

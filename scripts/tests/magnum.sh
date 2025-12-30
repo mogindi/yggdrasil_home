@@ -54,6 +54,8 @@ openstack coe cluster create k8s-cluster-$suffix \
 
 sleep 300
 
+set +x
+
 timeout_seconds=900
 sleep_time=10
 ready_status=CREATE_COMPLETE

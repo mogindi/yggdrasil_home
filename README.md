@@ -2,22 +2,12 @@
 
 ### On local Computer: ###
 
-1. Setup server from OVH or Hetzner GUI with password authentication
+1. Setup server from Hetzner GUI with password authentication
 
-2. On local computer, ensure os01 (for OVH) and os02 (for Hetzner) is added: 
+2. On local computer, ensure hyper01 (for OVH) and os02 (for Hetzner) is added: 
 ```
-grep -q os01 ~/.ssh/config || cat >> ~/.ssh/config <<EOF
-
-# ovh
-Host os01-ovh
-    Hostname 188.165.251.200
-    User root
-    ForwardAgent yes
-EOF
-grep -q os02 ~/.ssh/config || cat >> ~/.ssh/config <<EOF
-
 # hetzner
-Host os01-hetzner
+Host hyper01-hetzner
     Hostname 144.76.28.49
     User root
     ForwardAgent yes
@@ -31,12 +21,18 @@ git clone git@bitbucket.org:mgindi/kolla-deploy.git && cd kolla-deploy
 
 4. Run script to setup remote server
 ```
-./setup_remote_os_server.sh os01-hetzner
+./setup_remote_os_server.sh hyper01-hetzner
 ```
 
-5. Connect to remote server
+5. Copy secret files
 ```
-ssh os01-hetzner
+scp -o StrictHostKeyChecking=no ~/brevo.rc hyper01-hetzner:~/brevo.rc
+scp -o StrictHostKeyChecking=no ~/hetzner-storagebox.pass hyper01-hetzner:~/hetzner-storagebox.pass
+```
+
+6. Connect to remote server
+```
+ssh hyper01-hetzner
 ```
 
 ### On Remote Server: ###

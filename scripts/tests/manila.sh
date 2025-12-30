@@ -33,6 +33,8 @@ nova flavor-show  manila-service-flavor || nova flavor-create manila-service-fla
 suffix=$RANDOM
 manila create CIFS 1 --name demo-share-$suffix --share-network demo-share-network1 --share-type default_share_type
 
+set +x
+
 timeout_seconds=300
 sleep_time=5
 time=0
