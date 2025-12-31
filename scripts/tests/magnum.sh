@@ -11,12 +11,6 @@ CONFIG_DIR=$(pwd)/etc/kolla
 # source admin rc
 . $CONFIG_DIR/admin-openrc.sh
 
-# openstack flavor show c1 || openstack flavor create --id c1 --ram 256 --disk 1 --vcpus 1 --property hw_rng:allowed=True cirros256
-# openstack flavor show d1 || openstack flavor create --id d1 --ram 512 --disk 5 --vcpus 1 --property hw_rng:allowed=True ds512M
-# openstack flavor show d2 || openstack flavor create --id d2 --ram 1024 --disk 10 --vcpus 1 --property hw_rng:allowed=True ds1G
-# openstack flavor show d3 || openstack flavor create --id d3 --ram 2048 --disk 10 --vcpus 2 --property hw_rng:allowed=True ds2G
-# openstack flavor show d4 || openstack flavor create --id d4 --ram 4096 --disk 20 --vcpus 4 --property hw_rng:allowed=True ds4G
-
 fedora_image="$(openstack image list -f value -c Name | grep fedora-coreos)"
 
 # should fail if this isn't true
@@ -73,6 +67,7 @@ while true; do
     echo Unexpected status
     exit 1
   fi
+  echo Magnum: Waiting for cluster...
   time=$(( $time + $sleep_time ))
   sleep $sleep_time
 done

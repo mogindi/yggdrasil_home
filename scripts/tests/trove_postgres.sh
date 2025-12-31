@@ -40,7 +40,7 @@ sleep 60
 set +x
 
 timeout_seconds=300
-sleep_time=5
+sleep_time=10
 ready_status=ACTIVE
 wip_status=BUILD
 time=0
@@ -56,6 +56,7 @@ while true; do
     echo Unexpected status
     exit 1
   fi
+  echo Trove: Waiting for resource...
   time=$(( $time + $sleep_time ))
   sleep $sleep_time
 done
