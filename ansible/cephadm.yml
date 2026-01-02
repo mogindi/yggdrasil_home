@@ -41,11 +41,11 @@
           osd_pool_default_size = {{ storage_ceph_default_pool_size }}
           osd_pool_default_min_size = {{ storage_ceph_default_min_pool_size }}
 
-          public_network = {{ network_ceph_public_ip | ansible.netcommon.ipaddr('network/prefix') }}
-          cluster_network = {{ network_ceph_public_ip | ansible.netcommon.ipaddr('network/prefix') }}
+          public_network = {{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}
+          cluster_network = {{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}
 
     - name: Run cephadm bootstrap
-      command: "cephadm bootstrap --config /etc/ceph/initial-ceph.conf --allow-overwrite --mon-ip {{ network_ceph_public_ip | ansible.netcommon.ipaddr('address') }} --skip-monitoring-stack"
+      command: "cephadm bootstrap --config /etc/ceph/initial-ceph.conf --allow-overwrite --mon-ip {{ network_ceph_public_ip | ansible.utils.ipaddr('address') }} --skip-monitoring-stack"
       args:
         creates: /etc/ceph/ceph.client.admin.keyring
       register: cephadm_bootstrap
@@ -151,7 +151,7 @@
             label: _admin
             count_per_host: 1
           networks:
-          - {{ network_ceph_public_ip | ansible.netcommon.ipaddr('network') }}/{{ network_ceph_public_ip | ansible.netcommon.ipaddr('prefix') }}
+          - {{ network_ceph_public_ip | ansible.utils.ipaddr('network') }}/{{ network_ceph_public_ip | ansible.utils.ipaddr('prefix') }}
           spec:
             rgw_frontend_port: 6780
 

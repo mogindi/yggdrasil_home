@@ -112,7 +112,8 @@ init: prepare-ansible
 
 infra-up: harden docker vpn devices-configure provider-gateway-vip checks cephadm-deploy 
 
-kollaansible-up: kollaansible-images kollaansible-prepare kollaansible-create-certs kollaansible-bootstrap kollaansible-prechecks kollaansible-deploy kollaansible-lma
+#kollaansible-up: kollaansible-images kollaansible-prepare kollaansible-create-certs kollaansible-bootstrap kollaansible-prechecks kollaansible-deploy kollaansible-lma
+kollaansible-up: kollaansible-prepare kollaansible-bootstrap kollaansible-prechecks kollaansible-deploy kollaansible-lma
 
 postdeploy-up: kollaansible-postdeploy openstack-client-install openstack-resources-init openstack-images-upload symlink-etc-kolla  openstack-services
 

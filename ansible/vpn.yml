@@ -36,8 +36,8 @@
       command: |
         docker run -d \
           --device=/dev/net/tun --cap-add=NET_ADMIN --cpu-shares=8192 --net=host \
-          -e VPN_IP={{ vpn_ip | ansible.netcommon.ipaddr('address') }} \
-          -e VPN_CIDR={{ vpn_ip | ansible.netcommon.ipaddr('prefix') }} \
+          -e VPN_IP={{ vpn_ip | ansible.utils.ipaddr('address') }} \
+          -e VPN_CIDR={{ vpn_ip | ansible.utils.ipaddr('prefix') }} \
           -e VPN_PORT={{ vpn_port }} \
           -e VPN_INTERFACE={{ vpn_interface }} \
           -e VPN_KEY={{ hostvars[groups['deployment_nodes'][0]].vpn_key }} \
@@ -55,7 +55,7 @@
       when: docker_ps_peervpn.rc != 0
 
     - name: Test vpn connectivity
-      command: ping -c 3 {{ hostvars[vpn_peer_node].vpn_ip | ansible.netcommon.ipaddr('address') }}
+      command: ping -c 3 {{ hostvars[vpn_peer_node].vpn_ip | ansible.utils.ipaddr('address') }}
       loop: "{{ groups['deployment_nodes'] }}"
       loop_control:
         loop_var: vpn_peer_node

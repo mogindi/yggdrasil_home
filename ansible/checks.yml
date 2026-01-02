@@ -12,13 +12,12 @@
         - "{{ openstack_neutron_external_interface }}"
 
     - name: Check nodes could ping each other on the different vlans
-      command: ping -c 1 -W 2 {{ hostvars[item[0]][item[1]] | ansible.netcommon.ipaddr('address') }}
+      command: ping -c 1 -W 2 {{ hostvars[item[0]][item[1]] | ansible.utils.ipaddr('address') }}
       loop: "{{ groups['deployment_nodes'] | product(['network_openstack_mgmt_ip', 'network_ceph_public_ip', 'network_ceph_cluster_ip']) | list }}"
 
-    # Not a good test. Usually there are no ips on provider network nodes
-    # - name: Check nodes could all ping the gateway of provider network
-    #   command: ping -c 1 -W 2 {{ hostvars[item].network_provider_gateway_ip | ansible.netcommon.ipaddr('address') }}
-    #   loop: "{{ groups['deployment_nodes'] }}"
+    - name: Check nodes could all ping the gateway of provider network
+      command: ping -c 1 -W 2 {{ hostvars[item].network_provider_gateway_ip | ansible.utils.ipaddr('address') }}
+      loop: "{{ groups['deployment_nodes'] }}"
 
 
 - name: Check networking on deployment controller
@@ -31,7 +30,7 @@
       loop: "{{ groups['deployment_nodes'] }}"
 
     - name: Check deployment controller can ping vlans
-      command: ping -c 1 -W 2 {{ hostvars[item[0]][item[1]] | ansible.netcommon.ipaddr('address') }}
+      command: ping -c 1 -W 2 {{ hostvars[item[0]][item[1]] | ansible.utils.ipaddr('address') }}
       loop: "{{ groups['deployment_nodes'] | product(['network_openstack_mgmt_ip', 'network_ceph_public_ip'] ) | list }}"
 
 - name: Check storage

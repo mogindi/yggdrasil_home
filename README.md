@@ -43,7 +43,7 @@ bash -s <<EOF
 set -xe
 apt update
 apt install -y git make ansible bash-completion
-ansible-galaxy collection install ansible.netcommon:2.5.1
+ansible-galaxy collection install ansible.netcommon ansible.utils --force
 echo "set -g history-limit 10000" > ~/.tmux.conf
 echo "set paste" > ~/.vimrc
 

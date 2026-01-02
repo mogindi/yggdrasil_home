@@ -50,11 +50,11 @@
       when: docker_ps_provider_gateway_keepalived.rc != 0
 
     - name: Test provider vip connectivity
-      command: ping -c 3 {{ network_provider_gateway_keepalived_vip | ansible.netcommon.ipaddr('address') }}
+      command: ping -c 3 {{ network_provider_gateway_keepalived_vip | ansible.utils.ipaddr('address') }}
       changed_when: false
 
     - name: Ensure vip exists only on one node
-      shell: ip a | grep {{ network_provider_gateway_keepalived_vip | ansible.netcommon.ipaddr('address') }}/32
+      shell: ip a | grep {{ network_provider_gateway_keepalived_vip | ansible.utils.ipaddr('address') }}/32
       changed_when: false
       failed_when: false
       register: vip_check
@@ -73,7 +73,7 @@
 
     - name: Fail if vip doesn't exists exactly once
       fail:
-        msg: "The provider gateway VIP {{ network_provider_gateway_keepalived_vip | ansible.netcommon.ipaddr('address') }} exists {{ vip_count }} times! It should exist only once."
+        msg: "The provider gateway VIP {{ network_provider_gateway_keepalived_vip | ansible.utils.ipaddr('address') }} exists {{ vip_count }} times! It should exist only once."
       when: 
         - (vip_count | int) != 1
       run_once: true

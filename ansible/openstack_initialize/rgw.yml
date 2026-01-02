@@ -28,7 +28,7 @@
         # TODO: Fix for when no an aio
         {% for rgw_client in ceph_rgw_clients.stdout_lines %}
         {% set node = rgw_client.split('.')[3] %}
-        ceph config set {{ rgw_client }} rgw_frontends "beast endpoint={{ hostvars[node].network_ceph_public_ip | ansible.netcommon.ipaddr('address') }}:6780"
+        ceph config set {{ rgw_client }} rgw_frontends "beast endpoint={{ hostvars[node].network_ceph_public_ip | ansible.utils.ipaddr('address') }}:6780"
         {% endfor %}
 
 - name: Restart RGW

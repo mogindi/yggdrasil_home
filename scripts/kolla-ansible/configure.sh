@@ -86,7 +86,8 @@ set_global_config enable_mistral yes
 set_global_config enable_neutron_vpnaas yes
 set_global_config enable_octavia yes
 set_global_config enable_prometheus yes
-set_global_config enable_redis yes
+#set_global_config enable_redis yes
+set_global_config enable_valkey yes
 set_global_config enable_sahara yes
 set_global_config enable_senlin yes
 set_global_config enable_skyline yes
@@ -97,6 +98,8 @@ set_global_config enable_venus yes
 #set_global_config enable_vitrage yes
 set_global_config enable_watcher yes
 #set_global_config enable_zun yes  # not supported in 2023.2
+
+
 
 set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true }'
 

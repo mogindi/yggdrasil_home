@@ -45,7 +45,7 @@
         dest: /etc/hosts
         content: |
           {% for host in groups['deployment_nodes'] %}
-          {{ hostvars[host].network_openstack_mgmt_ip | ansible.netcommon.ipaddr('address') }} {{ host }}
+          {{ hostvars[host].network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }} {{ host }}
           {% endfor %}
       delegate_to: "{{ groups['deployment_controller'][0] }}"
       when: groups['deployment_controller'][0] not in groups['deployment_nodes']
@@ -62,7 +62,7 @@
 
           # BEGIN ANSIBLE GENERATED HOSTS
           {% for host in groups['deployment_nodes'] %}
-          {{ hostvars[host].network_openstack_mgmt_ip | ansible.netcommon.ipaddr('address') }} {{ host }}
+          {{ hostvars[host].network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }} {{ host }}
           {% endfor %}
           # END ANSIBLE GENERATED HOSTS
 
@@ -186,11 +186,11 @@
     - name: Configure network routes on deployment controller
       script: "{{ playbook_dir }}/../scripts/devices/configure_routes.sh"
       environment:
-        OPENSTACK_MGMT_NET: "{{ network_openstack_mgmt_ip | ansible.netcommon.ipaddr('network/prefix') }}"
-        CEPH_PUBLIC_NET: "{{ network_ceph_public_ip | ansible.netcommon.ipaddr('network/prefix') }}"
-        NETWORK_PROVIDER_NET: "{{ network_provider_gateway_ip | ansible.netcommon.ipaddr('network/prefix') }}"
-        NETWORK_PRIMARY_GATEWAY_IP: "{{ network_primary_gateway_ip | ansible.netcommon.ipaddr('address') }}"
-        NETWORK_PROVIDER_GATEWAY_IP: "{{ network_provider_gateway_ip | ansible.netcommon.ipaddr('address') }}"
+        OPENSTACK_MGMT_NET: "{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('network/prefix') }}"
+        CEPH_PUBLIC_NET: "{{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}"
+        NETWORK_PROVIDER_NET: "{{ network_provider_gateway_ip | ansible.utils.ipaddr('network/prefix') }}"
+        NETWORK_PRIMARY_GATEWAY_IP: "{{ network_primary_gateway_ip | ansible.utils.ipaddr('address') }}"
+        NETWORK_PROVIDER_GATEWAY_IP: "{{ network_provider_gateway_ip | ansible.utils.ipaddr('address') }}"
       when: network_add_routes_to_deployment_controller | default(false)
       delegate_to: "{{ groups['deployment_controller'][0] }}"
       run_once: true
