@@ -4,7 +4,7 @@ cat <<EOF | lxd init --preseed
 config: {}
 networks:
 - config:
-    ipv4.address: auto
+    ipv4.address: 10.227.41.1/24
     ipv6.address: none
   description: ""
   name: lxdbr0
@@ -12,7 +12,7 @@ networks:
   project: default
 storage_pools:
 - config:
-    size: 100GiB
+    size: 120GiB
   description: ""
   name: default
   driver: zfs
