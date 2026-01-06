@@ -1,0 +1,63 @@
+---  
+- name: Custom exporter setup
+  hosts: deployment_nodes
+  any_errors_fatal: true
+  serial: 1
+  tasks:
+    - name: Update and upgrade apt packages
+      apt:
+        upgrade: yes
+        update_cache: yes
+
+    - name: Auto remove unused packages
+      apt:
+        autoremove: yes
+
+    - name: Reboot if needed
+      reboot:
+        reboot_timeout: 600
+        pre_reboot_delay: 0
+        post_reboot_delay: 30
+        test_command: whoami
+      when: ansible_facts['pkg_mgr'] == 'apt' and ansible_facts['need_reboot'] is defined and ansible_facts['need_reboot']
+
+    - name: Wait for SSH to come back
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+      when: ansible_facts['pkg_mgr'] == 'apt' and ansible_facts['need_reboot'] is defined and ansible_facts['need_reboot']
+
+    - name: Ensure LTS release upgrades
+      copy:
+        dest: /etc/update-manager/release-upgrades
+        content: |
+          [DEFAULT]
+          Prompt=lts
+
+    - name: Ensure confold and confdef are set for non-interactive upgrade
+      copy:
+        dest: /etc/apt/apt.conf.d/local
+        content: |
+          Dpkg::Options {
+            "--force-confdef";
+            "--force-confold";
+          }
+
+    - name: Release upgrade
+      command: DEBIAN_FRONTEND=noninteractive do-release-upgrade -f DistUpgradeViewNonInteractive -quiet  # not sure DEBIAN_FRONTEND=noninteractive is needed
+      register: upgrade_result
+      changed_when: "'No new release found' not in upgrade_result.stdout"
+
+    - name: Reboot after release upgrade
+      reboot:
+        reboot_timeout: 600
+        pre_reboot_delay: 0
+        post_reboot_delay: 30
+        test_command: whoami
+      when: upgrade_result.changed
+
+    - name: Wait for SSH to come back
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+      when: upgrade_result.changed
