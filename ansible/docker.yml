@@ -37,6 +37,8 @@
       register: docker_daemon_json_configured
 
     - name: Overwrite docker source
+      vars:
+        os_release: "{% if (openstack_release|string) == '2025.2' %}noble{% else %}jammy{% endif %}"
       copy:
         dest: /etc/apt/sources.list.d/docker.sources
         content: |
@@ -44,7 +46,7 @@
 
           Types: deb
           URIs: https://download.docker.com/linux/ubuntu
-          Suites: jammy
+          Suites: {{ os_release }}
           Components: stable
           Signed-by: /etc/apt/keyrings/docker.asc
 
@@ -62,7 +64,9 @@
           - containerd.io
           - docker-buildx-plugin
           - docker-compose-plugin
+          - python3-docker  # needed for kolla-ansible
         update_cache: true
+        state: latest
       register: docker_installed
 
     - name: Ensure docker service is started and enabled

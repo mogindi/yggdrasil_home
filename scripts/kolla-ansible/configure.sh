@@ -99,11 +99,7 @@ set_global_config enable_venus yes
 set_global_config enable_watcher yes
 #set_global_config enable_zun yes  # not supported in 2023.2
 
-
-
 set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true }'
-
-#set_global_config magnum_tag zed-ubuntu-jammy
 
 set_global_config octavia_provider_drivers '"amphora:Amphora provider, ovn:OVN provider"'
 set_global_config octavia_amp_network_cidr $OPENSTACK_AMPHORA_SUBNET_CIDR

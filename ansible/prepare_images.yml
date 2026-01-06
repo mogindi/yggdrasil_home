@@ -14,17 +14,17 @@
           - image: quay.io/openstack.kolla/nova-novncproxy:{{ image_version }}
             custom_cmds: |
               sed -i '123i\ \ \ \ \ \ \ \ expected_protos.append(\"https\")' /var/lib/kolla/venv/lib/python3.10/site-packages/nova/console/websocketproxy.py
-          - image: quay.io/openstack.kolla/horizon:{{ openstack_release }}-ubuntu-jammy
+          - image: quay.io/openstack.kolla/horizon:{{ image_version }}
             custom_cmds: |
               apt update
               apt-get -y install python3-dev default-libmysqlclient-dev build-essential pkg-config
               . /var/lib/kolla/venv/bin/activate
               pip install mysqlclient
- #         - image: quay.io/openstack.kolla/freezer-scheduler:{{ openstack_release }}-ubuntu-jammy
+ #         - image: quay.io/openstack.kolla/freezer-scheduler:{{ image_version }}
  #           custom_cmds: |
  #             mkdir -p /etc/freezer/scheduler
  #             chown freezer:freezer /etc/freezer/scheduler
-          - image: quay.io/openstack.kolla/cloudkitty-processor:{{ openstack_release }}-ubuntu-jammy
+          - image: quay.io/openstack.kolla/cloudkitty-processor:{{ image_version }}
             custom_cmds: |
               cat > /etc/cloudkitty/metrics.yml <<EOF
               metrics:
@@ -125,10 +125,10 @@
                     aggregation_method: mean
                     resource_type: ceph_account
               EOF
-          - image: quay.io/openstack.kolla/magnum-api:{{ openstack_release }}-ubuntu-jammy
+          - image: quay.io/openstack.kolla/magnum-api:{{ image_version }}
             custom_cmds: |
               pip uninstall -y magnum-cluster-api
-          - image: quay.io/openstack.kolla/magnum-conductor:{{ openstack_release }}-ubuntu-jammy
+          - image: quay.io/openstack.kolla/magnum-conductor:{{ image_version }}
             custom_cmds: |
               sed -i 's/\[Service\]/StartLimitIntervalSec=500\nStartLimitBurst=5\n[Service]\nRestart=on-failure\nRestartSec=5s/g' \
               /var/lib/kolla/venv/lib/python3.10/site-packages/magnum/drivers/common/templates/kubernetes/fragments/configure-etcd.sh

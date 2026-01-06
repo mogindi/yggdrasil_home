@@ -11,11 +11,7 @@ cd workspace
 apt update
 
 # install python and deps
-apt remove -y python3-docker
 apt install -y python3-dev libffi-dev gcc libssl-dev python3-venv python3-pip libdbus-glib-1-dev #python3-openssl python3-docker
-
-# Ensure that pip docker isn't installed system-wide
-pip uninstall -y docker --break-system-packages
 
 # refresh venv
 rm -rf kolla-venv
