@@ -27,8 +27,7 @@ manila share-network-show demo-share-network1 || (
 	  --neutron-subnet-id $(openstack subnet show demo-subnet -f value -c id)
 )
 
-nova flavor-show  manila-service-flavor || nova flavor-create manila-service-flavor 100 2048 30 2
-
+openstack flavor show manila-service-flavor || openstack flavor create --id 100 --ram 2048 --disk 30 --vcpus 2
 
 suffix=$RANDOM
 manila create CIFS 1 --name demo-share-$suffix --share-network demo-share-network1 --share-type default_share_type
