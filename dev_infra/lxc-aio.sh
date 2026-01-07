@@ -11,7 +11,7 @@ EOT
 lxc launch --vm --config limits.cpu=4 --config limits.memory=32GB \
   --device eth0,ipv4.address=10.227.41.234 --device root,size=120GiB \
   --config  cloud-init.user-data="$user_data"  \
-  ubuntu-jammy-generic aio
+  ubuntu-noble-generic aio
 
 while [[ -z $ip ]]; do
   sleep 5
