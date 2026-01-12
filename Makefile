@@ -95,13 +95,16 @@ openstack-rgw:
 	ansible-playbook ansible/openstack_initialize/rgw.yml $(ARGS)
 
 openstack-magnum:
-	scripts/tests/magnum.sh
+#	scripts/tests/magnum.sh
+	ansible-playbook ansible/openstack_initialize/magnum.yml $(ARGS)
 
 openstack-manila:
-	scripts/tests/manila.sh
+#	scripts/tests/manila.sh
+	ansible-playbook ansible/openstack_initialize/manila.yml $(ARGS)
 
 openstack-trove-postgres:
-	scripts/tests/trove_postgres.sh
+#	scripts/tests/trove_postgres.sh
+	ansible-playbook ansible/openstack_initialize/trove.yml $(ARGS)
 
 openstack-remove-test-resources:
 	scripts/tests/remove-all.sh
@@ -130,7 +133,7 @@ dev-down: vagrant-destroy
 openstack-services:
 	ls ~/.ssh/id_rsa.pub || ssh-keygen -b 2048 -t rsa -f ~/.ssh/id_rsa -q -N ""
 	$(MAKE) -j 5 -Oline openstack-octavia openstack-rgw openstack-magnum  openstack-manila openstack-trove-postgres
-	$(MAKE) openstack-remove-test-resources
+#	$(MAKE) openstack-remove-test-resources
 
 
 ########

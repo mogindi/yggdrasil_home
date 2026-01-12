@@ -5,6 +5,17 @@
 # - If not dev, configure devices
 
 - name: Set up devices
+  hosts: deployment_controller
+  any_errors_fatal: true
+  tasks:
+    - name: Install tools on deployment controller
+      apt:
+        name: 
+          - qemu-utils
+          - cloud-guest-utils
+        update_cache: yes
+
+- name: Set up devices
   hosts: deployment_nodes
   any_errors_fatal: true
   tasks:
@@ -26,6 +37,7 @@
           - jq
           - watchman
           - cifs-utils
+          - qemu-utils
         update_cache: yes
         cache_valid_time: 3600
 

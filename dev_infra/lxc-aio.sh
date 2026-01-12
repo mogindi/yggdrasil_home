@@ -10,12 +10,12 @@ EOT
 
 lxc launch --vm --config limits.cpu=4 --config limits.memory=32GB \
   --device eth0,ipv4.address=10.227.41.234 --device root,size=120GiB \
-  --config  cloud-init.user-data="$user_data"  \
+  --config cloud-init.user-data="$user_data"  \
   ubuntu-noble-generic aio
 
 while [[ -z $ip ]]; do
   sleep 5
-  ip=$(lxc list -f csv | awk -F ',' '{print $3}' | awk '{print $1}')
+  ip=$(lxc list -f csv | grep aio | awk -F ',' '{print $3}' | awk '{print $1}')
 done
 
 cat > ~/.ssh/config <<EOF

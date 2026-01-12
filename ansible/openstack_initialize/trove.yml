@@ -1,0 +1,120 @@
+---
+- name: Setup Trove
+  hosts: deployment_controller
+  any_errors_fatal: true
+  tasks:
+    - name: Setup Trove
+      shell: |
+        #!/bin/bash
+
+        set -xe
+
+        # source venv
+        cd workspace
+        source kolla-venv/bin/activate
+
+        CONFIG_DIR=$(pwd)/etc/kolla
+
+        # source admin rc
+        . $CONFIG_DIR/admin-openrc.sh
+
+        image=trove-master-guest-ubuntu-jammy
+
+        # maybe this can be piped in a single command for speed?
+        openstack image list -f value | grep -i $image || (
+          wget https://tarballs.opendev.org/openstack/trove/images/$image.qcow2
+          xz -d $image.qcow2.xz
+          qemu-img convert $image.qcow2 $image.raw
+          openstack image create $image \
+            --progress \
+            --container-format bare \
+            --disk-format raw \
+            --private \
+            --tag amphora \
+            --file $image.raw \
+            --property hw_architecture='x86_64' \
+            --property hw_rng_model=virtio \
+            --project service
+          rm -f $image.*
+        )
+
+        image_name=$image
+
+        openstack image set --private  \
+            --tag trove --tag postgres --tag mysql $image_name
+
+
+        openstack keypair show --user trove testkey || openstack keypair create --public-key ~/.ssh/id_rsa.pub --user trove testkey
+
+        openstack datastore version show --datastore postgresql 12.18 || openstack datastore version create 12.18 postgresql postgresql "" \
+            --image-tags trove,postgres \
+            --active --default
+
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+
+- name: Test Trove
+  hosts: deployment_controller
+  any_errors_fatal: true
+  tasks:
+    - name: Create test Trove cluster
+      shell: |
+        #!/bin/bash
+
+        set -xe
+
+        # source venv
+        cd workspace
+        source kolla-venv/bin/activate
+
+        CONFIG_DIR=$(pwd)/etc/kolla
+
+        # source admin rc
+        . $CONFIG_DIR/admin-openrc.sh
+
+        suffix=$RANDOM
+        name=test-postgresql-$suffix
+      
+        openstack database instance create $name \
+            --flavor m1.medium \
+            --size 5 \
+            --nic net-id=$(openstack network show demo-net -f value -c id) \
+            --databases test --users userA:password \
+            --datastore postgresql --datastore-version 12.18 \
+            --replica-count 1 \
+            --is-public \
+            --allowed-cidr 0.0.0.0/0
+
+        sleep 60
+
+        set +x
+
+        timeout_seconds=300
+        sleep_time=10
+        ready_status=ACTIVE
+        wip_status=BUILD
+        time=0
+        while true; do
+          status=$(openstack database instance show $name -f value -c status)
+          if [[ $time -gt $timeout_seconds ]]; then
+            echo Timeout reached - exiting
+            exit 1
+          elif echo $status | grep -q $ready_status; then
+            echo Now available
+            break
+          elif echo $status | grep -qv $wip_status ; then
+            echo Unexpected status
+            exit 1
+          fi
+          echo Trove: Waiting for resource...
+          time=$(( $time + $sleep_time ))
+          sleep $sleep_time
+        done
+
+        echo Deleting instance...
+
+        openstack database instance delete $name
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash

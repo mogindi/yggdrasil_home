@@ -107,6 +107,14 @@ cat > win2022-gui.json <<'EOT'
         },
         {
             "type": "powershell",
+            "scripts": ["scripts/win-update.ps1"]
+        },
+        {
+            "type": "windows-restart",
+            "restart_timeout": "180m"
+        },
+        {
+            "type": "powershell",
             "scripts": ["scripts/cleanup.ps1"],
             "pause_before": "1m"
         },
@@ -184,17 +192,37 @@ packer init .
 
 PACKER_LOG=1 packer build -only=qemu win2022-gui.json #Windows Server 2022 w/ GUI
 
+
+cat > test-win-vm.sh <<EOT
+cd /var/lib/libvirt/packer/packer-Win2022/output-qemu/
+image=$(ls | awk '{print $1}')
+cp $image /var/lib/libvirt/images/ 
+virt-install \
+  --name testvm \
+  --memory 4096 \
+  --vcpus 2 \
+  --cpu host \
+  --machine q35 \
+  --disk path=/var/lib/libvirt/images/$image,format=qcow2,bus=virtio \
+  --import \
+  --os-variant generic \
+  --network bridge=virbr0,model=virtio \
+  --graphics vnc,listen=0.0.0.0 \
+  --noautoconsole
+EOT
+
+
 EOF
 )
 
 lxc launch --vm --config limits.cpu=4 --config limits.memory=8GB \
   --device eth0,ipv4.address=10.227.41.235 --device root,size=80GiB \
-  --config  cloud-init.user-data="$user_data"  \
+  --config cloud-init.user-data="$user_data"  \
   ubuntu-noble-generic image-builder
 
 while [[ -z $ip ]]; do
   sleep 5
-  ip=$(lxc list -f csv | awk -F ',' '{print $3}' | awk '{print $1}')
+  ip=$(lxc list -f csv | grep image-builder | awk -F ',' '{print $3}' | awk '{print $1}')
 done
 
 

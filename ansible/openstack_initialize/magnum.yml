@@ -1,0 +1,126 @@
+---
+- name: Setup Magnum
+  hosts: deployment_controller
+  any_errors_fatal: true
+  tasks:
+    - name: Setup Magnum
+      shell: |
+        #!/bin/bash
+
+        set -xe
+
+        # source venv
+        cd workspace
+        source kolla-venv/bin/activate
+
+        CONFIG_DIR=$(pwd)/etc/kolla
+
+        # source admin rc
+        . $CONFIG_DIR/admin-openrc.sh
+
+        image=fedora-coreos-38.20230806.3.0-openstack.x86_64
+
+        # maybe this can be piped in a single command for speed?
+        openstack image list -f value | grep -i $image || (
+          wget https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/38.20230806.3.0/x86_64/$image.qcow2.xz
+          xz -d $image.qcow2.xz
+          qemu-img convert $image.qcow2 $image.raw
+          openstack image create $image \
+            --progress \
+            --container-format bare \
+            --disk-format raw \
+            --private \
+            --tag amphora \
+            --file $image.raw \
+            --property hw_architecture='x86_64' \
+            --property hw_rng_model=virtio \
+            --project service
+          rm -f $image.*
+        )
+
+        fedora_image="$image"
+
+        openstack image set --property os_distro=fedora-coreos $fedora_image
+
+        ls ~/.ssh/id_rsa.pub || ssh-keygen -b 2048 -t rsa -f ~/.ssh/id_rsa -q -N ""
+
+        openstack keypair show testkey || openstack keypair create --public-key ~/.ssh/id_rsa.pub testkey
+
+        sleep 3
+
+        openstack coe cluster template show k8s-cluster-default-template || openstack coe cluster template create k8s-cluster-default-template \
+            --public \
+            --image $fedora_image \
+            --keypair testkey \
+            --external-network public1 \
+            --dns-nameserver 8.8.8.8 \
+            --flavor m1.medium \
+            --master-flavor m1.small \
+            --docker-volume-size 5 \
+            --volume-driver cinder \
+            --network-driver calico \
+            --docker-storage-driver overlay2 \
+            --coe kubernetes \
+            --labels kube_tag=v1.28.9-rancher1,container_runtime=containerd,containerd_version=1.6.31,containerd_tarball_sha256=75afb9b9674ff509ae670ef3ab944ffcdece8ea9f7d92c42307693efa7b6109d,cloud_provider_tag=v1.27.3,cinder_csi_plugin_tag=v1.27.3,k8s_keystone_auth_tag=v1.27.3,magnum_auto_healer_tag=v1.27.3,octavia_ingress_controller_tag=v1.27.3,calico_tag=v3.26.4,min_node_count=1
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+
+- name: Test magnum
+  hosts: deployment_controller
+  any_errors_fatal: true
+  tasks:
+    - name: Create test magnum cluster
+      shell: |
+        #!/bin/bash
+
+        set -xe
+
+        # source venv
+        cd workspace
+        source kolla-venv/bin/activate
+
+        CONFIG_DIR=$(pwd)/etc/kolla
+
+        # source admin rc
+        . $CONFIG_DIR/admin-openrc.sh
+
+        suffix=${RANDOM}
+        name=test-k8s-cluster-$suffix
+
+        openstack coe cluster create $name \
+            --cluster-template k8s-cluster-default-template \
+            --node-count 1
+
+        sleep 300
+
+        set +x
+
+        timeout_seconds=900
+        sleep_time=10
+        ready_status=CREATE_COMPLETE
+        wip_status=CREATE_IN_PROGRESS
+        time=0
+        while true; do
+          status=$(openstack coe cluster show $name -f value -c status)
+          if [[ $time -gt $timeout_seconds ]]; then
+            echo Timeout reached - exiting
+            exit 1
+          elif echo $status | grep -q $ready_status; then
+            echo Now available
+            break
+          elif echo $status | grep -qv $wip_status ; then
+            echo Unexpected status
+            exit 1
+          fi
+          echo Magnum: Waiting for cluster...
+          time=$(( $time + $sleep_time ))
+          sleep $sleep_time
+        done
+
+        echo Deleting cluster...
+
+        openstack coe cluster delete $name
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash

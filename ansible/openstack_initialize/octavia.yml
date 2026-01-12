@@ -24,7 +24,6 @@
         
         openstack image list -f value | grep -i amphora || (
           wget https://swift.services.a.regiocloud.tech/swift/v1/AUTH_b182637428444b9aa302bb8d5a5a418c/openstack-octavia-amphora-image/$image.qcow2
-          apt install -y qemu-utils
           qemu-img convert $image.qcow2 $image.raw
           openstack image create $image \
             --progress \
@@ -77,7 +76,9 @@
         . $CONFIG_DIR/admin-openrc.sh
 
         suffix=$RANDOM
-        openstack loadbalancer show lb-$suffix || openstack loadbalancer create --name lb-$suffix --vip-network-id demo-net
+        name=test-lb-$suffix
+
+        openstack loadbalancer create --name $name --vip-network-id demo-net
 
         sleep 60
 
@@ -89,7 +90,7 @@
         wip_status=PENDING_CREATE
         time=0
         while true; do
-          status=$(openstack loadbalancer show lb-$suffix -f value -c provisioning_status)
+          status=$(openstack loadbalancer show $name -f value -c provisioning_status)
           if [[ $time -gt $timeout_seconds ]]; then
             echo Timeout reached - exiting
             exit 1
@@ -104,6 +105,7 @@
           sleep $sleep_time
         done
 
+        openstack loadbalancer delete $name
       args:
         chdir: "{{ playbook_dir }}/../.."
         executable: /bin/bash

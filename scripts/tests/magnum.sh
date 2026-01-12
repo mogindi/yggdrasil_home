@@ -71,3 +71,8 @@ while true; do
   time=$(( $time + $sleep_time ))
   sleep $sleep_time
 done
+
+
+echo Deleting cluster...
+
+openstack coe cluster delete k8s-cluster-$suffix
