@@ -133,7 +133,7 @@ fi
 
 file=/mnt/winshare/Win2022_20251209.raw
 image_name=windows-server-2022.20251209.x86_64
-openstack image show $image_name || openstack image create --public \
+openstack image list -f value | grep $(echo $image_name | sed 's/\..*//g') || openstack image create --public \
   --property os_distro=windows --property os_type=windows --property os_version=s2022 \
   --property os_admin_user=Administrator --property hw_qemu_guest_agent=yes \
   --file $file \
@@ -141,8 +141,8 @@ openstack image show $image_name || openstack image create --public \
   $image_name
 
 # Clean up left over images
-pkill -f qemu-nbd
-rm *.qcow2*
+pkill -f qemu-nbd || true
+rm -rf *.qcow2*
 rm -rf /mnt/mod-image-*
 
 rmmod nbd
