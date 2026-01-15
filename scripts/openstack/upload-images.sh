@@ -11,12 +11,6 @@ CONFIG_DIR=$(pwd)/etc/kolla
 # source admin rc
 . $CONFIG_DIR/admin-openrc.sh
 
-
-# TODO: Add windows image
-# needs to be done manually for now due to EULA signature at
-# https://cloudbase.it/windows-cloud-images/#download
-
-
 modprobe nbd max_part=8
 
 run_linux_cmd_in_qcow2_image () {
@@ -27,7 +21,7 @@ run_linux_cmd_in_qcow2_image () {
 
 	mount_dir=/mnt/mod-image-$RANDOM
 	nbd_dev="/dev/$(lsblk -d | grep nbd[0-9] | grep " 0B " | awk 'FNR == 1 {print $1}')"
-	# seems set -e ignored inside the sub-shell, adding "|| exit 1 " in each line instead
+	# seems set -e ignored inside the sub-shell (not sure why), adding "|| exit 1 " in each line instead
 	if ! [[ -z $cmd ]]; then
 		(
 			set -x
@@ -131,8 +125,6 @@ create_openstack_linux_image https://download.freebsd.org/releases/VM-IMAGES/15.
   "xz_decompress"
 
 
-set -xe
-
 pass=$(cat ~/hetzner-storagebox.pass)
 if ! mount | grep -q /mnt/winshare; then
   mkdir -p /mnt/winshare
@@ -149,6 +141,8 @@ openstack image show $image_name || openstack image create --public \
   $image_name
 
 # Clean up left over images
-rm *.qcow2* 
+pkill -f qemu-nbd
+rm *.qcow2*
+rm -rf /mnt/mod-image-*
 
 rmmod nbd
