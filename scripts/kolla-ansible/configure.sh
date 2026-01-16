@@ -226,3 +226,11 @@ rbd_connect_timeout = 5
 [libvirt]
 cpu_mode = host-passthrough
 EOF
+
+# skyline
+mkdir -p etc/kolla/config/skyline/
+cat >  etc/kolla/config/skyline/skyline.yaml <<EOF
+openstack:
+  service_mapping:
+    volumev3: cinder
+EOF
