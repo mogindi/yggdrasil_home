@@ -30,11 +30,11 @@ run_linux_cmd_in_qcow2_image () {
 			sleep 1
 			lsblk -d ${nbd_dev}p* -o NAME,SIZE | sort -k 2 -h | tail -n 1 | awk '{print $1}' | xargs -I% mount $mnt_args /dev/% $mount_dir  || exit 1 
 			sleep 1
-			chroot $mount_dir /bin/sh -c "mv /etc/resolv.conf /etc/resolv.conf.bk && echo nameserver 8.8.8.8 | tee /etc/resolv.conf" || exit 1
+			chroot $mount_dir /bin/bash -c "mv /etc/resolv.conf /etc/resolv.conf.bk && echo nameserver 8.8.8.8 | tee /etc/resolv.conf" || exit 1
 			echo ==== RUNNING CMD ====
-			chroot $mount_dir /bin/sh -c "set -x; $cmd" || exit 1
+			chroot $mount_dir /bin/bash -c "set -x; $cmd" || exit 1
 			echo ==== END CMD ====
-			chroot $mount_dir /bin/sh -c "mv /etc/resolv.conf.bk /etc/resolv.conf" || exit 1
+			chroot $mount_dir /bin/bash -c "mv /etc/resolv.conf.bk /etc/resolv.conf" || exit 1
 
 			umount $mount_dir
 			qemu-nbd --disconnect $nbd_dev
