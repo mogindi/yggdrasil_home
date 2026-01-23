@@ -212,6 +212,35 @@ virt-install \
 EOT
 
 
+mkdir -p /root/omarchy
+cd /root/omarchy
+
+cat > install.sh <<'EOT'
+ls omarchy-3.3.2.iso || wget https://iso.omarchy.org/omarchy-3.3.2.iso
+iso=omarchy-3.3.2.iso
+cp $iso /var/lib/libvirt/images
+virt-install \
+  --name omarchy-vm \
+  --machine q35 \
+  --cpu host-passthrough \
+  --memory 4096 \
+  --vcpus 2 \
+  --iothreads 1 \
+  --controller scsi,model=virtio-scsi \
+  --disk size=30,path=/var/lib/libvirt/images/omarchy.qcow2,format=qcow2,bus=scsi,discard=unmap,cache=none,io=native \
+  --cdrom /var/lib/libvirt/images/$iso \
+  --rng /dev/urandom \
+  --os-variant generic \
+  --network bridge=virbr0,model=virtio \
+  --graphics spice,listen=0.0.0.0 \
+  --video virtio \
+  --input tablet,bus=virtio \
+  --sound ich9 \
+  --channel spicevmc \
+  --memorybacking=source.type=memfd,access.mode=shared \
+  --noautoconsole
+EOT
+
 EOF
 )
 

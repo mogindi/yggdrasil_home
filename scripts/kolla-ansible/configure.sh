@@ -234,3 +234,9 @@ openstack:
   service_mapping:
     volumev3: cinder
 EOF
+
+# manila
+cat >  etc/kolla/config/manila.conf <<EOF
+[DEFAULT]
+delete_share_server_with_last_share = false
+EOF
