@@ -232,11 +232,10 @@ virt-install \
   --rng /dev/urandom \
   --os-variant generic \
   --network bridge=virbr0,model=virtio \
-  --graphics spice,listen=0.0.0.0 \
+  --graphics vnc,listen=0.0.0.0 \
   --video virtio \
   --input tablet,bus=virtio \
   --sound ich9 \
-  --channel spicevmc \
   --memorybacking=source.type=memfd,access.mode=shared \
   --noautoconsole
 EOT
