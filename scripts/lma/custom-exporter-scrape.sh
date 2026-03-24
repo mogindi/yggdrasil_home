@@ -7,5 +7,5 @@ scrape_configs:
   - job_name: custom
     static_configs:
       - targets:
-        - '$OPENSTACK_MGMT_IP:8080'
+        - '$OPENSTACK_MGMT_IP:8079'
 EOF

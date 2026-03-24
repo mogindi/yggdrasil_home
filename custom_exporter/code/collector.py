@@ -22,7 +22,7 @@ def parse_metrics(path):
 
 if __name__ == '__main__':
     # Start up the server to expose the metrics.
-    start_http_server(8080)
+    start_http_server(8079)
     # Generate some requests.
     read_files = []
     while True:
