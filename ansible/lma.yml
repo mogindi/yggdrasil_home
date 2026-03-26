@@ -56,3 +56,10 @@
 
     - name: Scrape configs
       script: "{{ playbook_dir }}/../scripts/lma/prometheus-alerts/copy-rules.sh"
+
+    - name: Render Alertmanager config (PagerDuty-ready)
+      script: "{{ playbook_dir }}/../scripts/lma/alertmanager/render-config.sh"
+      environment:
+        PAGERDUTY_ROUTING_KEY: "{{ lookup('env', 'PAGERDUTY_ROUTING_KEY') | default('', true) }}"
+        PAGERDUTY_SEVERITY_MAP: "{{ lookup('env', 'PAGERDUTY_SEVERITY_MAP') | default('critical', true) }}"
+      run_once: true
