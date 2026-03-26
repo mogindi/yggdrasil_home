@@ -129,3 +129,52 @@ groups:
     annotations:
       description: OSD {{ $labels.ceph_daemon}} on cluster {{ $labels.cluster}} was reweighted for too long. Please either create silent or fix that issue
       summary: OSD {{ $labels.ceph_daemon }} on {{ $labels.cluster }} reweighted - {{ $value }}
+  - alert: CephMonQuorumTooSmall
+    expr: ceph_mon_quorum_status < 1
+    for: 5m
+    labels:
+      severity: critical
+      service: ceph
+    annotations:
+      summary: Ceph monitor quorum issue
+      description: Ceph monitor quorum is unhealthy for over 5 minutes.
+
+  - alert: CephOsdInButDown
+    expr: ceph_osd_in == 1 and ceph_osd_up == 0
+    for: 10m
+    labels:
+      severity: critical
+      service: ceph
+    annotations:
+      summary: Ceph OSD in but down
+      description: OSD {{ $labels.ceph_daemon }} is marked in but has been down for 10 minutes.
+
+  - alert: CephTooManyOsdsDown
+    expr: (count(ceph_osd_up == 0) / count(ceph_osd_up)) * 100 > 10
+    for: 5m
+    labels:
+      severity: warning
+      service: ceph
+    annotations:
+      summary: Too many Ceph OSDs are down
+      description: More than 10% of OSDs are currently down.
+
+  - alert: CephClusterUsageHigh
+    expr: (ceph_cluster_total_used_bytes / ceph_cluster_total_bytes) * 100 > 85
+    for: 15m
+    labels:
+      severity: warning
+      service: ceph
+    annotations:
+      summary: Ceph cluster usage is high
+      description: Ceph cluster usage is above 85% for 15 minutes.
+
+  - alert: CephClusterUsageCritical
+    expr: (ceph_cluster_total_used_bytes / ceph_cluster_total_bytes) * 100 > 92
+    for: 10m
+    labels:
+      severity: critical
+      service: ceph
+    annotations:
+      summary: Ceph cluster usage is critical
+      description: Ceph cluster usage is above 92% for 10 minutes.

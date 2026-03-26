@@ -67,11 +67,15 @@ kollaansible-postdeploy:
 
 kollaansible-lma:
 	ansible-playbook ansible/lma.yml -v
-	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus
+	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus,alertmanager
 
 prometheus-alerts:
 	scripts/lma/prometheus-alerts/copy-rules.sh
 	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus
+
+alertmanager-pagerduty:
+	scripts/lma/alertmanager/render-config.sh
+	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t alertmanager
 
 # openstack #
 

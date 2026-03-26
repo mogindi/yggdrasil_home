@@ -199,3 +199,55 @@ groups:
         The cloud capacity is currently at {{$value}} which means there is a risk of running
         out of capacity due to the timeline required to add new nodes.  Please ensure that adequate
         amount of infrastructure is assigned to this deployment to prevent this.
+
+- name: openstack-common
+  rules:
+  - alert: OpenStackExporterTargetDown
+    expr: up{job=~".*openstack.*"} == 0
+    for: 10m
+    labels:
+      severity: critical
+      service: openstack
+    annotations:
+      summary: OpenStack exporter target is down
+      description: OpenStack monitoring target {{ $labels.instance }} has been unreachable for 10 minutes.
+
+  - alert: OpenStackNovaAgentsDownRatio
+    expr: (count(openstack_nova_agent_state) - sum(openstack_nova_agent_state)) / clamp_min(count(openstack_nova_agent_state), 1) > 0.2
+    for: 10m
+    labels:
+      severity: critical
+      service: nova
+    annotations:
+      summary: High ratio of Nova agents down
+      description: More than 20% of Nova agents are down for 10 minutes.
+
+  - alert: OpenStackNeutronAgentsDownRatio
+    expr: (count(openstack_neutron_agent_state) - sum(openstack_neutron_agent_state)) / clamp_min(count(openstack_neutron_agent_state), 1) > 0.2
+    for: 10m
+    labels:
+      severity: critical
+      service: neutron
+    annotations:
+      summary: High ratio of Neutron agents down
+      description: More than 20% of Neutron agents are down for 10 minutes.
+
+  - alert: OpenStackCinderAgentsDownRatio
+    expr: (count(openstack_cinder_agent_state) - sum(openstack_cinder_agent_state)) / clamp_min(count(openstack_cinder_agent_state), 1) > 0.2
+    for: 10m
+    labels:
+      severity: warning
+      service: cinder
+    annotations:
+      summary: High ratio of Cinder agents down
+      description: More than 20% of Cinder agents are down for 10 minutes.
+
+  - alert: OpenStackNovaInstancesInError
+    expr: count(openstack_nova_server_status{status="ERROR"}) > 5
+    for: 30m
+    labels:
+      severity: warning
+      service: nova
+    annotations:
+      summary: Large number of Nova instances in ERROR
+      description: More than 5 Nova instances are stuck in ERROR for at least 30 minutes.

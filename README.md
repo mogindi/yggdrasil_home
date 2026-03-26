@@ -83,3 +83,26 @@ export SSH_AUTH_SOCK=/root/.ssh/ssh_auth_sock
 cd kolla-deploy
 tmux
 ```
+
+## LMA alerts and PagerDuty quick integration
+
+This repository now includes additional Ceph/OpenStack alert rules and a quick Alertmanager PagerDuty integration path:
+
+- Deploy the LMA bundle (rules + dashboards + Alertmanager config):
+  ```bash
+  make kollaansible-lma
+  ```
+- Deploy only Prometheus alert rules:
+  ```bash
+  make prometheus-alerts
+  ```
+- Render and apply Alertmanager config for PagerDuty:
+  ```bash
+  export PAGERDUTY_ROUTING_KEY=<pagerduty-integration-key>
+  export PAGERDUTY_SEVERITY_MAP='critical|warning'
+  make alertmanager-pagerduty
+  ```
+
+Notes:
+- `PAGERDUTY_ROUTING_KEY` controls whether PagerDuty notifications are active.
+- `PAGERDUTY_SEVERITY_MAP` is a regex used by Alertmanager route matchers.
