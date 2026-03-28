@@ -72,3 +72,8 @@ config
 # terraform 
 terraform/.terraform*
 terraform/terraform*.tfstate*
+
+# inventory
+ansible/inventory/**
+!ansible/inventory/aio
+!ansible/inventory/vagrant**
