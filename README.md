@@ -121,14 +121,14 @@ make prometheus-alerts
 Render/apply Alertmanager PagerDuty config:
 
 ```bash
-export PAGERDUTY_ROUTING_KEY=<pagerduty-integration-key>
+export PAGERDUTY_INTEGRATION_KEY=<pagerduty-integration-key>
 export PAGERDUTY_SEVERITY_MAP='critical|warning'
 make alertmanager-pagerduty
 ```
 
 Notes:
 
-- `PAGERDUTY_ROUTING_KEY` enables PagerDuty notifications.
+- `PAGERDUTY_INTEGRATION_KEY` enables PagerDuty notifications.
 - `PAGERDUTY_SEVERITY_MAP` is used for Alertmanager route matching.
 
 ---
