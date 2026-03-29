@@ -18,7 +18,8 @@ add_metric() {
 
 extract_expected_routes() {
   local service_file="$1"
-  sed -n 's/.*grep -q "\([^"]*\)".*/\1/p' "$service_file"
+  local table=$2
+  cat $service_file | grep -o "ip route add.* table $table" | sed "s/ip route add //; s/ table $table//"
 }
 
 check_routes_for_table() {
@@ -34,7 +35,7 @@ check_routes_for_table() {
   fi
 
   local expected_routes
-  expected_routes=$(extract_expected_routes "$service_file")
+  expected_routes=$(extract_expected_routes "$service_file" "$table")
   local expected_count=0
   local present_count=0
 
