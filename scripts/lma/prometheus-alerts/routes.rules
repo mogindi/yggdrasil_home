@@ -1,0 +1,18 @@
+groups:
+- name: NetworkRoutes
+  rules:
+  - alert: NetworkRoutesMainTableMismatch
+    expr: network_routes_main_healthy == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: Main routing table is missing one or more expected routes
+
+  - alert: NetworkRoutesVswitchTableMismatch
+    expr: network_routes_vswitch_healthy == 0
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: Vswitch routing table is missing one or more expected routes
