@@ -66,7 +66,7 @@ kollaansible-postdeploy:
 	scripts/kolla-ansible/kolla-ansible.sh post-deploy
 
 kollaansible-lma:
-	ansible-playbook ansible/lma.yml -v
+	ansible-playbook ansible/lma.yml -v $(ARGS)
 	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus,alertmanager
 
 prometheus-alerts:

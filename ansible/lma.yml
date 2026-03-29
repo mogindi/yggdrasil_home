@@ -2,6 +2,7 @@
 - name: Custom exporter setup
   hosts: deployment_nodes
   any_errors_fatal: true
+  tags: custom_exporter
   tasks:
     - name: Copy custom_metrics folder
       copy:

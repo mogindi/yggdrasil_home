@@ -9,13 +9,14 @@ cd custom_exporter
 docker ps | grep -q custom_exporter || ./docker_run.sh
 
 
-service=docker-custom-metrics
+service=custom-metrics-scripts
 cat > /etc/systemd/system/$service.service << EOF
 [Unit]
 After=docker.service
 
 [Service]
-ExecStart=/bin/bash -c "mkdir -p /tmp/custom_metrics && ls -d /opt/custom_metrics/* | xargs -I% bash % &"
+ExecStartPre=mkdir -p /tmp/custom_metrics
+ExecStart=/bin/bash -c "while true; do ls -d /opt/custom_metrics/* | xargs -I% bash % & sleep 300; done"
 
 [Install]
 WantedBy=default.target
