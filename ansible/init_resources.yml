@@ -1,14 +1,50 @@
 ---
+# - name: Init openstack resources and public network
+#   hosts: deployment_controller
+#   any_errors_fatal: true
+#   tasks:
+#     - name: Initial openstack resources
+#       script: "{{ playbook_dir }}/../scripts/openstack/init-resources.sh"
+#       args:
+#         chdir: "{{ playbook_dir }}/.."
+#       environment:
+#         EXT_NET_CIDR: "{{ openstack_public_network.cidr }}"
+#         EXT_NET_GATEWAY: "{{ openstack_public_network.gateway_ip }}"
+#         EXT_NET_RANGE: "start={{ openstack_public_network.allocation_start }},end={{ openstack_public_network.allocation_end }}"
+#         EXT_NET_MTU: "{{ openstack_public_network.mtu | default(1500) }}"
+
 - name: Init openstack resources and public network
   hosts: deployment_controller
   any_errors_fatal: true
   tasks:
     - name: Initial openstack resources
-      script: "{{ playbook_dir }}/../scripts/openstack/init-resources.sh"
       args:
         chdir: "{{ playbook_dir }}/.."
-      environment:
-        EXT_NET_CIDR: "{{ openstack_public_network.cidr }}"
-        EXT_NET_GATEWAY: "{{ openstack_public_network.gateway_ip }}"
-        EXT_NET_RANGE: "start={{ openstack_public_network.allocation_start }},end={{ openstack_public_network.allocation_end }}"
-        EXT_NET_MTU: "{{ openstack_public_network.mtu | default(1500) }}"
+      shell: |
+        set -xe
+
+        # source venv
+        cd workspace
+        source kolla-venv/bin/activate
+
+        CONFIG_DIR=$(pwd)/etc/kolla
+
+        # source admin rc
+        . $CONFIG_DIR/admin-openrc.sh
+
+
+        export KOLLA_CONFIG_PATH=$CONFIG_DIR
+        export ENABLE_EXT_NET=0
+
+        openstack network show {{ openstack_public_network.name }}  || openstack network create --share --external --provider-physical-network physnet1 --provider-network-type flat  {{ openstack_public_network.name }}
+        openstack network set --mtu {{ openstack_public_network.mtu | default(1500) }} {{ openstack_public_network.name }}
+
+        # doing in 2 commands for updates
+        {% for subnet in openstack_public_network.subnets -%}
+          openstack subnet show {{ subnet.name }} || openstack subnet create --no-dhcp --network {{ openstack_public_network.name }} --subnet-range {{ subnet.cidr }} --gateway none {{ subnet.name }}
+          openstack subnet set --no-allocation-pool --allocation-pool start={{ subnet.allocation_start }},end={{ subnet.allocation_end }} --gateway {{ subnet.gateway_ip }} {{ subnet.name }} 
+        {% endfor %}
+
+        ./kolla-ansible/tools/init-runonce
+
+        openstack router set --external-gateway {{ openstack_public_network.name }} demo-router

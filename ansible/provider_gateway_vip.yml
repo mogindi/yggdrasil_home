@@ -4,7 +4,7 @@
   gather_facts: yes
   any_errors_fatal: true
   tasks:
-    - name: Check if vpn container exists
+    - name: Check if provider_gateway_keepalived container exists
       shell: docker ps -a | grep -q provider_gateway_keepalived
       failed_when: false
       changed_when: false

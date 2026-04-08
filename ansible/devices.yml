@@ -170,6 +170,7 @@
       environment:
         table: "{{ item.table }}"
         network_cidr: "{{ item.network_cidr }}"
+        table_id: "{{ index | int + 1 }}"
       shell: |
         cat > /etc/systemd/system/network_create_route_table_$table.service <<EOF
         [Unit]
@@ -177,7 +178,7 @@
         After=network.target
 
         [Service]
-        ExecStart=/bin/bash -c "grep -q \"1 $table\" /etc/iproute2/rt_tables || ( echo \"1 $table\" | tee -a /etc/iproute2/rt_tables )"
+        ExecStart=/bin/bash -c "grep -q \"$table_id $table\" /etc/iproute2/rt_tables || ( echo \"$table_id $table\" | tee -a /etc/iproute2/rt_tables )"
         ExecStart=/bin/bash -c "ip rule list | grep -q \"from $network_cidr\" || ip rule add from $network_cidr lookup $table"
         ExecStart=/bin/bash -c "ip rule list | grep -q \"to $network_cidr\" || ip rule add to $network_cidr lookup $table"
         {% for route in item.routes %}
@@ -194,19 +195,21 @@
         systemctl restart network_create_route_table_$table.service
         systemctl enable network_create_route_table_$table.service
       loop: "{{ network_extra_route_tables | default([]) }}"
+      loop_control:
+        index_var: index
 
-    # DO WE REALLY NEED THIS, IF WE USE VPN?
-    - name: Configure network routes on deployment controller
-      script: "{{ playbook_dir }}/../scripts/devices/configure_routes.sh"
-      environment:
-        OPENSTACK_MGMT_NET: "{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('network/prefix') }}"
-        CEPH_PUBLIC_NET: "{{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}"
-        NETWORK_PROVIDER_NET: "{{ network_provider_gateway_ip | ansible.utils.ipaddr('network/prefix') }}"
-        NETWORK_PRIMARY_GATEWAY_IP: "{{ network_primary_gateway_ip | ansible.utils.ipaddr('address') }}"
-        NETWORK_PROVIDER_GATEWAY_IP: "{{ network_provider_gateway_ip | ansible.utils.ipaddr('address') }}"
-      when: network_add_routes_to_deployment_controller | default(false)
-      delegate_to: "{{ groups['deployment_controller'][0] }}"
-      run_once: true
+    # # DO WE REALLY NEED THIS, IF WE USE VPN?
+    # - name: Configure network routes on deployment controller
+    #   script: "{{ playbook_dir }}/../scripts/devices/configure_routes.sh"
+    #   environment:
+    #     OPENSTACK_MGMT_NET: "{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('network/prefix') }}"
+    #     CEPH_PUBLIC_NET: "{{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}"
+    #     NETWORK_PROVIDER_NETS: "{%- for subnet in openstack_public_network.subnets %}{{ subnet.cidr | ansible.utils.ipaddr('network/prefix') }} {% endfor %}"
+    #     NETWORK_PRIMARY_GATEWAY_IP: "{{ network_primary_gateway_ip | ansible.utils.ipaddr('address') }}"
+    #     NETWORK_PROVIDER_GATEWAY_IP: "{{ network_provider_gateway_ip | ansible.utils.ipaddr('address') }}"
+    #   when: network_add_routes_to_deployment_controller | default(false)
+    #   delegate_to: "{{ groups['deployment_controller'][0] }}"
+    #   run_once: true
 
     - name: Create cni directory for Zun
       command: mkdir -p /opt/cni/bin/

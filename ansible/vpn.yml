@@ -1,6 +1,6 @@
 ---
 - name: Set up vpn networks
-  hosts: deployment_nodes
+  hosts: deployment_nodes, deployment_controller
   gather_facts: yes
   any_errors_fatal: true
   tasks:

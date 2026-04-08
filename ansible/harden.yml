@@ -46,7 +46,7 @@
           export OPENSTACK_MGMT_NET={{ network_openstack_mgmt_ip | ansible.utils.ipaddr('network/prefix') }}
           export CEPH_PUBLIC_NET={{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}
           export CEPH_CLUSTER_NET={{ network_ceph_cluster_ip | ansible.utils.ipaddr('network/prefix') }}
-          export NETWORK_PROVIDER_NET={{ network_provider_gateway_ip | ansible.utils.ipaddr('network/prefix') }}
+          export NETWORK_PROVIDER_NETS="{%- for subnet in openstack_public_network.subnets %}{{ subnet.cidr | ansible.utils.ipaddr('network/prefix') }} {% endfor %}"
           export DEPLOYMENT_NODE_IPS="{%- for node in groups['deployment_nodes'] %}{{ hostvars[node].ansible_default_ipv4.address | ansible.utils.ipaddr('address') }} {% endfor %}"
           export VPN_NET={{ vpn_ip | ansible.utils.ipaddr('network/prefix') }}
           
