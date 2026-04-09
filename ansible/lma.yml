@@ -21,16 +21,28 @@
       args:
         chdir: /opt
 
+- name: Grafana dashboard setup
+  hosts: deployment_nodes[0]
+  any_errors_fatal: true
+  tags: grafana_dashboards
+  tasks:
     - name: Import Grafana dashboards
       script: "{{ playbook_dir }}/../scripts/lma/grafana/import.sh"
       environment:
         IP: localhost
       run_once: true
 
-- name: Scrape configs
+- name: Add targets to Prometheus
   hosts: deployment_controller
   any_errors_fatal: true
+  tags: add_targets
   tasks:
+    - name: Gather facts on deployment nodes
+      setup:
+      delegate_to: "{{ item }}"
+      delegate_facts: true
+      loop: "{{ groups['deployment_nodes'] }}"
+
     - name: Copy custom exporter target
       copy:
         dest: "{{ playbook_dir }}/../workspace/etc/kolla/config/prometheus/prometheus.yml.d/custom.yml"
@@ -40,7 +52,7 @@
               static_configs:
                 - targets:
           {% for node in groups['deployment_nodes'] %}
-                  - '{{ hostvars[node].ansible_openstack_mgmt.ipv4.address }}:8080'
+                  - '{{ hostvars[node].ansible_openstack_mgmt.ipv4.address }}:8079'
           {% endfor %}
 
     - name: Copy ceph target
@@ -55,8 +67,25 @@
                   - '{{ hostvars[node].ansible_ceph_public.ipv4.address }}:9283'
           {% endfor %}
 
-    - name: Scrape configs
+- name: Copy rules
+  hosts: deployment_controller
+  any_errors_fatal: true
+  tags: copy_rules
+  tasks:
+    - name: Copy rules
       script: "{{ playbook_dir }}/../scripts/lma/prometheus-alerts/copy-rules.sh"
+
+- name: PagerDuty integration
+  tags: 
+    - pagerduty
+    - never
+  hosts: deployment_controller
+  any_errors_fatal: true
+  tasks:
+    - name: Check for PagerDuty integration key
+      fail:
+        msg: "PAGERDUTY_INTEGRATION_KEY environment variable is not set. Please set it to enable PagerDuty integration."
+      when: lookup('env', 'PAGERDUTY_INTEGRATION_KEY') == ''
 
     - name: Render Alertmanager config (PagerDuty-ready)
       shell: "{{ playbook_dir }}/../scripts/lma/alertmanager/render-config.sh"
@@ -65,3 +94,4 @@
       environment:
         PAGERDUTY_INTEGRATION_KEY: "{{ lookup('env', 'PAGERDUTY_INTEGRATION_KEY') | default('', true) }}"
         PAGERDUTY_SEVERITY_MAP: "{{ lookup('env', 'PAGERDUTY_SEVERITY_MAP') | default('critical', true) }}"
+        
