@@ -133,23 +133,37 @@ cluster_user_trust = True
 EOF
 
 # trove
-cat >  etc/kolla/config/trove.conf <<EOF
+cat > etc/kolla/config/trove.conf <<EOF
 [DEFAULT]
-max_accepted_volume_size = 50
+max_accepted_volume_size = 100
 
 #[oslo_messaging_rabbit]
 #rabbit_quorum_queue = false
 #amqp_durable_queues = true
 #rabbit_ha_queues = true
+
 EOF
 mkdir -p etc/kolla/config/trove/
-cat >  etc/kolla/config/trove/trove-taskmanager.conf <<EOF
+cat > etc/kolla/config/trove/trove-taskmanager.conf <<EOF
 [DEFAULT]
 nova_keypair = testkey
 
 #[oslo_messaging_rabbit]
 #rabbit_quorum_queue = true
 #rabbit_ha_queues = false
+EOF
+cat > etc/kolla/config/trove-guestagent.conf <<EOF
+[postgresql]
+database_service_uid = 1001
+database_service_gid = 1001
+
+[mysql]
+database_service_uid = 1001
+database_service_gid = 1001
+
+[mariadb]
+database_service_uid = 1001
+database_service_gid = 1001
 EOF
 
 # designate
