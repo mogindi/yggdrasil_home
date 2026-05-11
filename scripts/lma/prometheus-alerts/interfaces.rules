@@ -2,12 +2,12 @@ groups:
 - name: NetworkInterfaces
   rules:
   - alert: NetworkInterfaceDown-vpn0
-    expr: network_interface_vpn0_up == 0
+    expr: network_interface_vpn0_present == 0
     for: 5m
     labels:
       severity: critical
     annotations:
-      summary: Interface vpn0 is down or missing
+      summary: Interface vpn0 is missing
 
   - alert: NetworkInterfaceDown-ceph_public
     expr: network_interface_ceph_public_up == 0
