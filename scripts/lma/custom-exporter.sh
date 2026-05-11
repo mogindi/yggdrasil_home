@@ -22,7 +22,7 @@ while true; do
   shopt -s nullglob
   for script in /opt/custom_metrics/*; do
     [[ -f "$script" ]] || continue
-    bash "$script" &
+    timeout 180s bash "$script" &
     pids+=("$!")
   done
   shopt -u nullglob
