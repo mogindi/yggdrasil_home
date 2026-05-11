@@ -73,7 +73,9 @@
   tags: copy_rules
   tasks:
     - name: Copy rules
-      script: "{{ playbook_dir }}/../scripts/lma/prometheus-alerts/copy-rules.sh"
+      command: "{{ playbook_dir }}/../scripts/lma/prometheus-alerts/copy-rules.sh"
+      args:
+        chdir: "{{ playbook_dir }}/.."
 
 - name: PagerDuty integration
   tags: 

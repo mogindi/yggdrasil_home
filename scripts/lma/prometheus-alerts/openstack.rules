@@ -53,6 +53,16 @@ groups:
 
 - name: neutron
   rules:
+  - alert: PublicIpsAlmostExhausted
+    expr: |
+      (sum by (network_name) (openstack_neutron_network_ip_availabilities_used{network_name="public1"}))/sum by (network_name) (openstack_neutron_network_ip_availabilities_total{network_name="public1"}) * 100 > 80
+    labels:
+      severity: P4
+    annotations:
+      summary: "Public IPs almost exhausted"
+      description: >
+        Public IPs almost exhausted.
+
   - alert: NeutronAgentDown
     expr: |
       openstack_neutron_agent_state != 1
