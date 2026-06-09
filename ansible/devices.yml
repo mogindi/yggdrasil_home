@@ -164,6 +164,7 @@
         - network_extra_routes_main_table is defined
         - network_extra_routes_main_table.routes is defined
         - network_extra_routes_main_table.routes | length > 0
+      tags: routes
         
 
     - name: Configure additional route tables
@@ -197,6 +198,7 @@
       loop: "{{ network_extra_route_tables | default([]) }}"
       loop_control:
         index_var: index
+      tags: routes
 
     # # DO WE REALLY NEED THIS, IF WE USE VPN?
     # - name: Configure network routes on deployment controller
