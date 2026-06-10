@@ -8,11 +8,12 @@ cd custom_exporter
 
 docker ps | grep -q custom_exporter || ./docker_run.sh
 
-
 service=custom-metrics-scripts
+
+mkdir -p /usr/local/bin
 runner=/usr/local/bin/custom-metrics-runner.sh
 
-cat > "$runner" << 'EOF'
+cat > $runner <<'EOF'
 #!/bin/bash
 set -euo pipefail
 

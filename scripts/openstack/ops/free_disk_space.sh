@@ -14,7 +14,8 @@ sudo journalctl --vacuum-size=500M
 
 # clear logs in /var/log
 find /var/log -type f -name "*.log.*" | xargs rm -rf
-#find /var/log -type f -name "*.log" | xargs -I% bash -c "> %"
+find /var/log -maxdepth 1 -iname "*.[0-9]*" -type f | xargs rm -rf
+find /var/log -type f -name "*.log" | xargs -I% bash -c "> %"
 
 # clear docker container logs
 find /var/lib/docker/containers -type f -name "*.log" | xargs -I% bash -c '>%'
