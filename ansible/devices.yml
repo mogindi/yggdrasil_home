@@ -157,8 +157,8 @@
         RequiredBy=network.target
         EOF
 
-        systemctl daemon-reload
-        systemctl restart network_create_routes.service
+        systemctl daemon-reload && \
+        systemctl restart network_create_routes.service && \
         systemctl enable network_create_routes.service
       when:
         - network_extra_routes_main_table is defined
@@ -192,8 +192,8 @@
         RequiredBy=network.target
         EOF
 
-        systemctl daemon-reload
-        systemctl restart network_create_route_table_$table.service
+        systemctl daemon-reload && \
+        systemctl restart network_create_route_table_$table.service && \
         systemctl enable network_create_route_table_$table.service
       loop: "{{ network_extra_route_tables | default([]) }}"
       loop_control:
