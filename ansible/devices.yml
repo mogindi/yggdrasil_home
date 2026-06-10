@@ -86,10 +86,12 @@
         content: "{{ network_netplan_overrides_file | to_nice_yaml }}"
       when: network_netplan_overrides_file | length > 0
       register: netplan_config_0
+      tags: netplan
 
     - name: netplan apply
       command: netplan apply
       when: netplan_config_0.changed | default(false)
+      tags: netplan
 
     - name: Stop and disable NetworkManager
       systemd:
