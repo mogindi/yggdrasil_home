@@ -7,6 +7,8 @@ route_table_service_prefix="network_create_route_table_"
 route_table_service_suffix=".service"
 
 metric_lines=()
+total_expected_routes=0
+total_present_routes=0
 
 sanitize_metric_name() {
   local value="$1"
@@ -16,6 +18,16 @@ sanitize_metric_name() {
 
 add_metric() {
   metric_lines+=("\"$1\" : $2")
+}
+
+add_all_routes_health_metric() {
+  if [[ $total_expected_routes -eq 0 ]]; then
+    add_metric "network_routes_all_healthy" -1
+  elif [[ $total_expected_routes -eq $total_present_routes ]]; then
+    add_metric "network_routes_all_healthy" 1
+  else
+    add_metric "network_routes_all_healthy" 0
+  fi
 }
 
 extract_expected_routes() {
@@ -72,6 +84,9 @@ check_routes_for_table() {
   add_metric "network_routes_${metric_table}_expected_routes" "$expected_count"
   add_metric "network_routes_${metric_table}_present_routes" "$present_count"
 
+  total_expected_routes=$((total_expected_routes + expected_count))
+  total_present_routes=$((total_present_routes + present_count))
+
   if [[ $expected_count -eq 0 ]]; then
     add_metric "network_routes_${metric_table}_healthy" -1
   elif [[ $expected_count -eq $present_count ]]; then
@@ -93,6 +108,8 @@ for service_file in "${route_table_services[@]}"; do
   table="${table%${route_table_service_suffix}}"
   check_routes_for_table "$table" "$service_file"
 done
+
+add_all_routes_health_metric
 
 mkdir -p "$(dirname "$output_file")"
 
