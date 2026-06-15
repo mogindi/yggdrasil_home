@@ -1,9 +1,5 @@
 #!/bin/bash
 
-if [[ -z $NETWORK_PROVIDER_NET ]]; then
-  echo Empty NETWORK_PROVIDER_NET Env Var. Exitting..
-  exit=1
-fi
 if [[ -z $OPENSTACK_MGMT_NET ]]; then
   echo Empty OPENSTACK_MGMT_NET Env Var. Exitting..
   exit=1
@@ -17,7 +13,7 @@ if [[ -z $CEPH_CLUSTER_NET ]]; then
   exit=1
 fi
 if [[ -z $NETWORK_PROVIDER_NETS ]]; then
-  echo Empty NETWORK_PROVIDER_NET Env Var. Exitting..
+  echo Empty NETWORK_PROVIDER_NETS Env Var. Exitting..
   exit=1
 fi
 if [[ -z $DEPLOYMENT_NODE_IPS ]]; then
