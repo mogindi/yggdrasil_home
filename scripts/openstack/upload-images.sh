@@ -27,7 +27,7 @@ create_openstack_linux_image https://cloud-images.ubuntu.com/noble/current/noble
   "--public --property os_distro=ubuntu --property os_type=linux --property os_version=24.04 --property os_admin_user=root --property hw_qemu_guest_agent=yes"
 
 # not running commands - no sh?
-create_openstack_linux_image https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-20250106.0.x86_64.qcow2 \
+create_openstack_linux_image https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2 \
   centos-stream-10.$date.x86_64 \
   "" \
   "--public --property os_distro=centos --property os_type=linux --property os_version=10 --property os_admin_user=root --property hw_qemu_guest_agent=no"  # TODO add qemu agent
@@ -37,7 +37,7 @@ create_openstack_linux_image https://download.fedoraproject.org/pub/fedora/linux
   "" \
   "--public --property os_distro=fedora --property os_type=linux --property os_version=43 --property os_admin_user=root --property hw_qemu_guest_agent=no"  # TODO add qemu agent
 
-create_openstack_linux_image https://fastly.mirror.pkgbuild.com/images/v20260101.476437/Arch-Linux-x86_64-cloudimg.qcow2 \
+create_openstack_linux_image https://fastly.mirror.pkgbuild.com/images/latest/Arch-Linux-x86_64-cloudimg.qcow2 \
   arch-linux-v20260101.20260101.x86_64 \
   "" \
   "--public --property os_distro=arch --property os_type=linux --property os_version=v20260101 --property os_admin_user=root --property hw_qemu_guest_agent=no"  # TODO add qemu agent

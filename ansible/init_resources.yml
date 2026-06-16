@@ -1,18 +1,4 @@
 ---
-# - name: Init openstack resources and public network
-#   hosts: deployment_controller
-#   any_errors_fatal: true
-#   tasks:
-#     - name: Initial openstack resources
-#       script: "{{ playbook_dir }}/../scripts/openstack/init-resources.sh"
-#       args:
-#         chdir: "{{ playbook_dir }}/.."
-#       environment:
-#         EXT_NET_CIDR: "{{ openstack_public_network.cidr }}"
-#         EXT_NET_GATEWAY: "{{ openstack_public_network.gateway_ip }}"
-#         EXT_NET_RANGE: "start={{ openstack_public_network.allocation_start }},end={{ openstack_public_network.allocation_end }}"
-#         EXT_NET_MTU: "{{ openstack_public_network.mtu | default(1500) }}"
-
 - name: Init openstack resources and public network
   hosts: deployment_controller
   any_errors_fatal: true
@@ -20,7 +6,10 @@
     - name: Initial openstack resources
       args:
         chdir: "{{ playbook_dir }}/.."
+        executable: /bin/bash
       shell: |
+        #!/bin/bash
+
         set -xe
 
         # source venv
