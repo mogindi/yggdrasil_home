@@ -23,8 +23,9 @@
         rm -f $image.qcow2.CHECKSUM*
         
         openstack image list -f value | grep -i amphora || (
-          wget https://swift.services.a.regiocloud.tech/swift/v1/AUTH_b182637428444b9aa302bb8d5a5a418c/openstack-octavia-amphora-image/$image.qcow2
-          qemu-img convert $image.qcow2 $image.raw
+          rm -f $image.qcow2 $image.raw && \
+          wget https://swift.services.a.regiocloud.tech/swift/v1/AUTH_b182637428444b9aa302bb8d5a5a418c/openstack-octavia-amphora-image/$image.qcow2  && \
+          qemu-img convert $image.qcow2 $image.raw  && \
           openstack image create $image \
             --progress \
             --container-format bare \
@@ -34,7 +35,7 @@
             --file $image.raw \
             --property hw_architecture='x86_64' \
             --property hw_rng_model=virtio \
-            --project service
+            --project service  && \
           rm -f $image.qcow2 $image.raw
         )
 

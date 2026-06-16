@@ -22,15 +22,16 @@
 
         # maybe this can be piped in a single command for speed?
         openstack image list -f value | grep -i $image || (
-          wget https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/38.20230806.3.0/x86_64/$image.qcow2.xz
-          xz -d $image.qcow2.xz
-          qemu-img convert $image.qcow2 $image.raw
+          rm -f $image.* && \
+          wget https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/38.20230806.3.0/x86_64/$image.qcow2.xz  && \
+          xz -d $image.qcow2.xz  && \
+          qemu-img convert $image.qcow2 $image.raw && \
           openstack image create $image \
             --progress \
             --public \
             --property os_distro=fedora-coreos --property os_type=linux --property os_version=38 \
             --property os_admin_user=root \
-            --file $image.raw
+            --file $image.raw  && \
           rm -f $image.*
         )
 

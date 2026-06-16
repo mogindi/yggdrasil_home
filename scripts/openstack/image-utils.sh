@@ -9,7 +9,7 @@ run_linux_cmd_in_qcow2_image () {
 	mnt_args=$3
 
 	mount_dir=/mnt/mod-image-$RANDOM
-  nbd_dev_num=$(lsblk -d | grep nbd[0-9] | grep ' 0B ' | wc -l)
+    nbd_dev_num=$(lsblk -d | grep nbd[0-9] | grep ' 0B ' | wc -l)
 	nbd_dev="/dev/$(lsblk -d | grep nbd[0-9] | grep ' 0B ' | awk '{print $1}' | sed "$(( $RANDOM % $nbd_dev_num ))q;d")"
 	# seems set -e ignored inside the sub-shell (not sure why), adding "|| exit 1 " in each line instead
 	if ! [[ -z $cmd ]]; then
