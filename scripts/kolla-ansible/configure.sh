@@ -126,8 +126,12 @@ for service in glance nova cinder/cinder-volume cinder/cinder-backup; do
 done
 
 # magnum
+cat > etc/kolla/config/magnum.conf <<EOF
+[drivers]
+disabled_drivers = k8s_cluster_api_ubuntu,k8s_cluster_api_ubuntu_focal,k8s_cluster_api_debian,k8s_cluster_api_flatcar,k8s_cluster_api_rockylinux
+EOF
 mkdir -p etc/kolla/config/magnum/
-cat >  etc/kolla/config/magnum/magnum-conductor.conf <<EOF
+cat > etc/kolla/config/magnum/magnum-conductor.conf <<EOF
 [trust]
 cluster_user_trust = True
 EOF
