@@ -22,7 +22,8 @@ find /var/lib/docker/containers -type f -name "*.log" | xargs -I% bash -c '>%'
 
 # clear docker resources
 docker system df -v
-docker system prune -a --force
+docker image prune -a --force
+docker volume prune -a --force
 
 # delete old "flog" indices
 curl -X DELETE 'http://10.0.10.100:9200/flog-*?expand_wildcards=all'
