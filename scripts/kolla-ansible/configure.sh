@@ -3,6 +3,7 @@
 # Based on https://docs.openstack.org/kolla-ansible/latest/user/quickstart.html
 
 CONFIG_DIR=etc/kolla
+: "${OPENSTACK_ZUN_KATA_ENABLED:=no}"
 
 # just sets `<key>: <value>` in globals.yml
 function set_global_config () {
@@ -97,9 +98,17 @@ set_global_config enable_trove yes
 set_global_config enable_venus yes
 #set_global_config enable_vitrage yes
 set_global_config enable_watcher yes
-set_global_config enable_zun yes
+set_global_config enable_zun "$OPENSTACK_ZUN_KATA_ENABLED"
 
-set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true }'
+if [[ $OPENSTACK_ZUN_KATA_ENABLED == "yes" ]]; then
+	set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true, "runtimes": { "kata": { "runtimeType": "io.containerd.kata.v2" } } }'
+	set_global_config zun_compute_extra_volumes '["/etc/zun/docker-pki:/etc/zun/docker-pki:ro"]'
+	set_global_config zun_wsproxy_extra_volumes '["/etc/zun/docker-pki:/etc/zun/docker-pki:ro"]'
+else
+	set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true }'
+	set_global_config zun_compute_extra_volumes '[]'
+	set_global_config zun_wsproxy_extra_volumes '[]'
+fi
 
 set_global_config octavia_provider_drivers '"amphora:Amphora provider, ovn:OVN provider"'
 set_global_config octavia_amp_network_cidr $OPENSTACK_AMPHORA_SUBNET_CIDR
@@ -262,7 +271,30 @@ delete_share_server_with_last_share = false
 EOF
 
 # zun
-cat > etc/kolla/config/zun.conf <<EOF
+if [[ $OPENSTACK_ZUN_KATA_ENABLED == "yes" ]]; then
+	mkdir -p etc/kolla/config/zun
+	cat > etc/kolla/config/zun.conf <<'EOF'
+[DEFAULT]
+container_runtime = kata
+
+[docker]
+docker_remote_api_version = 1.44
+api_url = https://{{ api_interface_address | put_address_in_context('url') }}:2376
+docker_remote_api_url = https://{{ api_interface_address | put_address_in_context('url') }}:2376
+docker_remote_api_host = {{ api_interface_address }}
+docker_remote_api_port = 2376
+api_insecure = false
+ca_file = /etc/zun/docker-pki/ca.pem
+cert_file = /etc/zun/docker-pki/cert.pem
+key_file = /etc/zun/docker-pki/key.pem
+EOF
+	cat > etc/kolla/config/zun/policy.yaml <<'EOF'
+"container:create:runtime": "!"
+EOF
+else
+	rm -f etc/kolla/config/zun/policy.yaml
+	cat > etc/kolla/config/zun.conf <<EOF
 [docker]
 docker_remote_api_version = 1.44
 EOF
+fi

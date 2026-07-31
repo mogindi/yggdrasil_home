@@ -14,6 +14,13 @@
           - image: quay.io/openstack.kolla/nova-novncproxy:{{ image_version }}
             custom_cmds: |
               sed -i '123i\ \ \ \ \ \ \ \ expected_protos.append(\"https\")' /var/lib/kolla/venv/lib/python3.10/site-packages/nova/console/websocketproxy.py
+          - image: quay.io/openstack.kolla/zun-wsproxy:{{ image_version }}
+            customize_marker: customize-zun-wsproxy-mtls-v1.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-wsproxy-mtls.py
+                dest: /tmp/patch-zun-wsproxy-mtls.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-wsproxy-mtls.py
           - image: quay.io/openstack.kolla/horizon:{{ image_version }}
             custom_cmds: |
               apt update
@@ -151,6 +158,13 @@
               chown root:root /dev/shm/$(hostname)_nova-novncproxy_qmanager
               chmod 644 /dev/shm/$(hostname)_nova-novncproxy_qmanager
               EOF
+          - image: quay.io/openstack.kolla/zun-wsproxy:{{ image_version }}
+            customize_marker: customize-zun-wsproxy-mtls-v1.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-wsproxy-mtls.py
+                dest: /tmp/patch-zun-wsproxy-mtls.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-wsproxy-mtls.py
       when: (openstack_release|string) == '2025.2'
 
     - name: Pull images
@@ -166,7 +180,10 @@
         set -xe
         docker rm -f tmp_build 2>/dev/null || true
         docker run -it -d --network host -u root --name tmp_build {{ item.item.image }} bash
-        docker exec tmp_build bash -c "set -xe; (ls customize.done && touch do_not_commit) || ( {{ item.item.custom_cmds }} ) && touch customize.done" || (docker rm -f tmp_build; exit 1)
+        {% for custom_file in item.item.custom_files | default([]) %}
+        docker cp {{ playbook_dir }}/../{{ custom_file.src }} tmp_build:{{ custom_file.dest }}
+        {% endfor %}
+        docker exec tmp_build bash -c "set -xe; (ls {{ item.item.customize_marker | default('customize.done') }} && touch do_not_commit) || ( {{ item.item.custom_cmds }} ) && touch {{ item.item.customize_marker | default('customize.done') }}" || (docker rm -f tmp_build; exit 1)
         docker exec tmp_build ls do_not_commit || docker commit -c 'ENTRYPOINT ["dumb-init", "--"]' -c 'CMD ["kolla_start"]' tmp_build {{ item.item.image }}
       loop: "{{ docker_pull.results }}"
       register: customize_images
