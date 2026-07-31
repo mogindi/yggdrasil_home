@@ -26,6 +26,7 @@ Vagrant.configure("2") do |config|
     hyper01.vm.provider :libvirt do |domain|
       domain.memory = 65536 
       domain.cpus = 6
+      domain.cpu_mode = "host-passthrough"
       domain.machine_virtual_size = 300
     end
     hyper01.vm.hostname = "hyper01"
@@ -37,6 +38,7 @@ Vagrant.configure("2") do |config|
     hyper02.vm.provider :libvirt do |domain|
       domain.memory = 65536
       domain.cpus = 6
+      domain.cpu_mode = "host-passthrough"
       domain.machine_virtual_size = 300
     end
     hyper02.vm.hostname = "hyper02"
@@ -49,4 +51,3 @@ Vagrant.configure("2") do |config|
   end
 
 end
-

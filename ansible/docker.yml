@@ -75,23 +75,3 @@
         state: restarted
         enabled: yes
       when: docker_installed.changed or docker_daemon_json_configured.changed
-
-    - name: Enable docker api over tcp
-      shell: |
-        mkdir -p /etc/systemd/system/docker.service.d
-        cat > /etc/systemd/system/docker.service.d/override.conf <<EOF
-        [Service]
-        ExecStart=
-        ExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2375 --containerd=/run/containerd/containerd.sock
-        EOF
-      args:
-        creates: /etc/systemd/system/docker.service.d/override.conf
-      register: reconfigure_docker
-
-    - name: Enable docker service
-      systemd:
-        name: docker.service
-        state: restarted
-        enabled: yes
-        daemon_reload: yes
-      when: reconfigure_docker.changed

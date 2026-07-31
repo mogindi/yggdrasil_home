@@ -14,6 +14,10 @@ resource "libvirt_domain" "vm_2" {
   vcpu   = 6
   firmware = "/usr/share/OVMF/OVMF_CODE.fd"
 
+  cpu {
+    mode = "host-passthrough"
+  }
+
   network_interface {
     network_id     = libvirt_network.net_main.id
     hostname       = "hyper02"

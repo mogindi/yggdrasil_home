@@ -1,0 +1,67 @@
+---
+- name: Set Docker server certificate paths
+  set_fact:
+    docker_server_pki_dir: "{{ docker_pki_root }}/servers/{{ docker_server_host }}"
+    docker_server_management_ip: >-
+      {{ hostvars[docker_server_host].network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}
+
+- name: Create Docker server certificate directory
+  file:
+    path: "{{ docker_server_pki_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Write Docker server certificate extensions
+  copy:
+    dest: "{{ docker_server_pki_dir }}/extensions.cnf"
+    owner: root
+    group: root
+    mode: '0600'
+    content: |
+      basicConstraints = critical,CA:FALSE
+      keyUsage = critical,digitalSignature,keyEncipherment
+      extendedKeyUsage = serverAuth
+      subjectAltName = DNS:{{ docker_server_host }},IP:{{ docker_server_management_ip }}
+  register: docker_server_extensions
+
+- name: Generate Docker server private key
+  command: >-
+    openssl genrsa -out {{ docker_server_pki_dir }}/key.pem 4096
+  args:
+    creates: "{{ docker_server_pki_dir }}/key.pem"
+
+- name: Check Docker server certificate lifetime
+  command: >-
+    openssl x509 -checkend 2592000 -noout
+    -in {{ docker_server_pki_dir }}/cert.pem
+  register: docker_server_certificate_check
+  changed_when: false
+  failed_when: false
+
+- name: Generate Docker server certificate request
+  command: >-
+    openssl req -new
+    -key {{ docker_server_pki_dir }}/key.pem
+    -subj /CN={{ docker_server_host }}
+    -out {{ docker_server_pki_dir }}/server.csr
+  when: docker_server_extensions.changed or docker_server_certificate_check.rc != 0
+
+- name: Sign Docker server certificate
+  command: >-
+    openssl x509 -req -sha256 -days 397
+    -in {{ docker_server_pki_dir }}/server.csr
+    -CA {{ docker_pki_root }}/ca.pem
+    -CAkey {{ docker_pki_root }}/ca-key.pem
+    -CAcreateserial
+    -extfile {{ docker_server_pki_dir }}/extensions.cnf
+    -out {{ docker_server_pki_dir }}/cert.pem
+  when: docker_server_extensions.changed or docker_server_certificate_check.rc != 0
+
+- name: Protect Docker server private key
+  file:
+    path: "{{ docker_server_pki_dir }}/key.pem"
+    owner: root
+    group: root
+    mode: '0600'
