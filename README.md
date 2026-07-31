@@ -102,6 +102,54 @@ $EDITOR ansible/inventory/<env_name>/*
 make all-up ENV=<env_name>
 ```
 
+### Kata-backed Zun containers
+
+The supplied inventories enable Kata Containers 3.31.0 for Zun. Kata runs
+each application container in a lightweight VM, while Kolla control-plane
+containers continue to use Docker's default `runc` runtime.
+
+Before deployment, every node in `deployment_nodes` must provide `/dev/kvm`.
+Enable CPU virtualization in firmware on bare metal. For virtual deployment
+nodes, enable nested virtualization on the outer hypervisor; the included
+Terraform and Vagrant libvirt definitions use host CPU passthrough. Kata is
+not supported when a deployment node is itself an ordinary LXC or Docker
+container.
+
+For a custom inventory, set `openstack_zun_kata_enabled: true` to enable Zun
+and copy the pinned `kata_version`, `kata_architectures`, and `kata_checksums`
+values from one of the supplied inventories. The deployment then performs
+these steps in order:
+
+1. `ansible/docker.yml` installs Docker without exposing its remote API.
+2. `ansible/devices.yml` installs and validates Kata, creates the private
+   Docker PKI, and enables a mutually authenticated Docker listener on each
+   node's OpenStack management address at port 2376.
+3. Kolla image preparation patches Zun's interactive-exec proxy to use those
+   TLS credentials.
+4. `scripts/kolla-ansible/configure.sh` selects Kata for Zun, mounts the
+   client credentials, and prevents API callers (including administrators)
+   from overriding the runtime.
+
+The CA and signing key remain on the deployment controller under
+`/etc/yggdrasil/zun-docker-pki`. Server certificates are unique per node;
+leaf certificates are renewed when fewer than 30 days remain. The Docker API
+is no longer available on unauthenticated port 2375.
+
+After host preparation, useful checks on each deployment node are:
+
+```bash
+/opt/kata/bin/kata-runtime check
+docker info --format '{{json .Runtimes}}'
+docker run --rm --runtime kata busybox true
+ss -ltn '( sport = :2375 or sport = :2376 )'
+```
+
+Also create a Zun smoke container, confirm its Docker
+`HostConfig.Runtime` is `kata`, test Kuryr networking, and open an interactive
+exec session. Existing Zun containers retain their original runtime: pause
+new container creation during rollout and recreate existing workloads after
+the hosts and Zun services have been reconfigured.
+
 ### Build your own inventory and deploy your own private cloud (step-by-step)
 
 Use this flow if you want to deploy on your own hardware or VMs instead of the bundled examples.
