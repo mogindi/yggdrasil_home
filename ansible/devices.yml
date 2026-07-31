@@ -373,10 +373,24 @@
         mode: '0755'
       when: openstack_zun_kata_enabled | default(false) | bool
 
+    - name: Check for incorrectly nested Kata release
+      stat:
+        path: "/opt/kata-{{ kata_version }}/kata/bin/kata-runtime"
+      register: kata_nested_runtime
+      when: openstack_zun_kata_enabled | default(false) | bool
+
+    - name: Remove incorrectly nested Kata release
+      file:
+        path: "/opt/kata-{{ kata_version }}/kata"
+        state: absent
+      when:
+        - openstack_zun_kata_enabled | default(false) | bool
+        - kata_nested_runtime.stat.exists
+
     - name: Extract Kata static release
       command: >-
         tar --zstd -xf /var/cache/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst
-        -C /opt/kata-{{ kata_version }} --strip-components=2
+        -C /opt/kata-{{ kata_version }} --strip-components=3
       args:
         creates: "/opt/kata-{{ kata_version }}/bin/kata-runtime"
       when: openstack_zun_kata_enabled | default(false) | bool
