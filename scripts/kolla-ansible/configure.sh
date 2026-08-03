@@ -3,7 +3,11 @@
 # Based on https://docs.openstack.org/kolla-ansible/latest/user/quickstart.html
 
 CONFIG_DIR=etc/kolla
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${OPENSTACK_ZUN_KATA_ENABLED:=no}"
+: "${OPENSTACK_ZUN_CPU_ALLOCATION_RATIO:=8.0}"
+: "${OPENSTACK_ZUN_RAM_ALLOCATION_RATIO:=1.5}"
+: "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED:=no}"
 
 # just sets `<key>: <value>` in globals.yml
 function set_global_config () {
@@ -296,5 +300,48 @@ else
 	cat > etc/kolla/config/zun.conf <<EOF
 [docker]
 docker_remote_api_version = 1.44
+EOF
+fi
+
+cat >> etc/kolla/config/zun.conf <<EOF
+
+[compute]
+cpu_allocation_ratio = $OPENSTACK_ZUN_CPU_ALLOCATION_RATIO
+ram_allocation_ratio = $OPENSTACK_ZUN_RAM_ALLOCATION_RATIO
+EOF
+
+# Keep function collection out of CloudKitty unless it is independently
+# enabled. The raw function ledger is owned by yggdrasil_finops and is not
+# affected by this switch.
+mkdir -p etc/kolla/config/cloudkitty
+cp "$SCRIPT_DIR/cloudkitty-metrics.yml" etc/kolla/config/cloudkitty/metrics.yml
+if [[ "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED,,}" == "yes" || "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED,,}" == "true" ]]; then
+	cat >> etc/kolla/config/cloudkitty/metrics.yml <<'EOF'
+
+  function.cpu.utilization:
+    unit: vCPU
+    groupby:
+      - id
+      - project_id
+    metadata:
+      - function_name
+      - runtime
+    extra_args:
+      aggregation_method: mean
+      resource_type: yggdrasil_function
+      force_granularity: 300
+
+  function.memory.usage:
+    unit: GiB
+    groupby:
+      - id
+      - project_id
+    metadata:
+      - function_name
+      - runtime
+    extra_args:
+      aggregation_method: mean
+      resource_type: yggdrasil_function
+      force_granularity: 300
 EOF
 fi

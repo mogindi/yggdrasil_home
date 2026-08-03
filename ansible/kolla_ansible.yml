@@ -60,6 +60,10 @@
         OPENSTACK_WORKER_COUNT: "{{ openstack_worker_count }}"
         OPENSTACK_ZUN_KATA_ENABLED: >-
           {{ (openstack_zun_kata_enabled | default(false) | bool) | ternary('yes', 'no') }}
+        OPENSTACK_ZUN_CPU_ALLOCATION_RATIO: "{{ openstack_zun_cpu_allocation_ratio | default(8.0) }}"
+        OPENSTACK_ZUN_RAM_ALLOCATION_RATIO: "{{ openstack_zun_ram_allocation_ratio | default(1.5) }}"
+        OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED: >-
+          {{ (function_cloudkitty_enabled | default(false) | bool) | ternary('yes', 'no') }}
         OPENSTACK_AMPHORA_SUBNET_CIDR: "{{ openstack_amphora_network.cidr }}"
         OPENSTACK_PHYSNET_MTU: "{{ openstack_physnet_mtu | default(1500) }}"
         OPENSTACK_PATH_MTU: "{{ openstack_physnet_mtu | default(1500) }}"
