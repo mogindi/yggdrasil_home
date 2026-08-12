@@ -2,7 +2,9 @@
 cat > /etc/systemd/system/network_create_route_table_$table.service <<EOF
 [Unit]
 Description=Network route table $table for $network_cidr
-After=network.target
+Wants=network-online.target
+After=systemd-networkd.service network-online.target
+PartOf=systemd-networkd.service
 
 [Service]
 ExecStart=/bin/bash -c "grep -q \"1 $table\" /etc/iproute2/rt_tables || ( echo \"1 $table\" | tee -a /etc/iproute2/rt_tables )"
@@ -20,12 +22,12 @@ done <<< "$_routes"
 
 cat >> /etc/systemd/system/network_create_route_table_$table.service <<EOF
 Type=oneshot
+RemainAfterExit=yes
 
 [Install]
-WantedBy=default.target
-RequiredBy=network.target
+WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
 systemctl restart network_create_route_table_$table.service
-systemctl enable network_create_route_table_$table.service
+systemctl reenable network_create_route_table_$table.service

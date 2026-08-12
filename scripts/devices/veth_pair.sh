@@ -20,17 +20,19 @@ EOT
 cat > /etc/systemd/system/network_veth_device.service <<EOF
 [Unit]
 Description=create veth device for openstack external gateway
-After=network.target
+Wants=network-online.target
+After=systemd-networkd.service network-online.target
+PartOf=systemd-networkd.service
 
 [Service]
 ExecStart=/bin/bash /opt/veth_device.sh
 Type=oneshot
+RemainAfterExit=yes
 
 [Install]
-WantedBy=default.target
-RequiredBy=network.target
+WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
 systemctl restart network_veth_device.service
-systemctl enable network_veth_device.service
+systemctl reenable network_veth_device.service

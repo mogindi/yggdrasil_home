@@ -32,8 +32,9 @@ EOF
 
 cat > /etc/systemd/system/internet-access-bridge.service << EOF
 [Unit]
-After=network-online.target
 Wants=network-online.target
+After=systemd-networkd.service network-online.target
+PartOf=systemd-networkd.service
 
 [Service]
 ExecStart=-/bin/bash /opt/revive_internet_access.sh
@@ -43,7 +44,5 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable internet-access-bridge
+systemctl reenable internet-access-bridge
 systemctl start internet-access-bridge
-
-
