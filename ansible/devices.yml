@@ -149,6 +149,16 @@
         update_cache: yes
         cache_valid_time: 3600
 
+    - name: Disable automatic unattended apt upgrades
+      lineinfile:
+        path: /etc/apt/apt.conf.d/20auto-upgrades
+        regexp: '^APT::Periodic::Unattended-Upgrade\s+'
+        line: 'APT::Periodic::Unattended-Upgrade "0";'
+        create: yes
+        owner: root
+        group: root
+        mode: '0644'
+
     - name: Update and upgrade apt packages
       apt:
         upgrade: yes
