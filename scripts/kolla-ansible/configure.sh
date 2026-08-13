@@ -284,6 +284,7 @@ docker_remote_api_url = https://{{ api_interface_address | put_address_in_contex
 docker_remote_api_host = {{ api_interface_address }}
 docker_remote_api_port = 2376
 api_insecure = false
+execute_timeout = 60
 ca_file = /etc/zun/docker-pki/ca.pem
 cert_file = /etc/zun/docker-pki/cert.pem
 key_file = /etc/zun/docker-pki/key.pem
@@ -296,5 +297,6 @@ else
 	cat > etc/kolla/config/zun.conf <<EOF
 [docker]
 docker_remote_api_version = 1.44
+execute_timeout = 60
 EOF
 fi

@@ -104,7 +104,8 @@ make all-up ENV=<env_name>
 
 ### Kata-backed Zun containers
 
-The supplied inventories enable Kata Containers 3.31.0 for Zun. Kata runs
+The supplied inventories enable Kata Containers 3.32.0 for Zun. This version
+includes the Docker 29 time-namespace compatibility fix. Kata runs
 each application container in a lightweight VM, while Kolla control-plane
 containers continue to use Docker's default `runc` runtime.
 
