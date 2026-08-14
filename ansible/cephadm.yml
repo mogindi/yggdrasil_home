@@ -43,6 +43,7 @@
           [global]
           osd_pool_default_size = {{ storage_ceph_default_pool_size }}
           osd_pool_default_min_size = {{ storage_ceph_default_min_pool_size }}
+          bdev_enable_discard = {{ storage_ceph_osd_discard | default(false) | bool | ternary('true', 'false') }}
 
           public_network = {{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}
           cluster_network = {{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}
@@ -113,6 +114,12 @@
         dest: /etc/ceph/ceph.client.admin.keyring
       loop: "{{ groups['deployment_nodes'] + groups['deployment_controller'] }}"
       delegate_to: "{{ item }}"
+
+    - name: Configure BlueStore OSD discard
+      command: >-
+        ceph config set osd bdev_enable_discard
+        {{ storage_ceph_osd_discard | bool | ternary('true', 'false') }}
+      when: storage_ceph_osd_discard is defined
 
     # run ceph-volume from mon containers
     - name: Zap osds
