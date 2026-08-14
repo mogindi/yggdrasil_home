@@ -319,7 +319,9 @@ Below is a complete catalog of Make targets in this repo.
 
 - `openstack-client-install` — installs OpenStack client tooling.
 - `openstack-resources-init` — initializes OpenStack resources.
-- `openstack-images-upload` — uploads cloud images.
+- `openstack-images-upload` — uploads the default cloud image set. When run with
+  `ENV=aio`, this target skips that batch; the Magnum initialization still
+  uploads the Fedora CoreOS 38 image required by its cluster template.
 - `symlink-etc-kolla` — symlinks `workspace/etc/kolla/*` into `/etc/kolla/`.
 - `openstack-octavia` — initializes Octavia resources.
 - `openstack-rgw` — initializes RGW resources.

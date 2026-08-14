@@ -87,7 +87,11 @@ openstack-resources-init:
 	#scripts/openstack/init-resources.sh
 
 openstack-images-upload:
+ifeq ($(ENV),aio)
+	@echo "AIO: skipping the default cloud image batch; Magnum uploads Fedora CoreOS 38 separately."
+else
 	scripts/openstack/upload-images.sh
+endif
 
 symlink-etc-kolla:
 	ln -sfr workspace/etc/kolla/* /etc/kolla/
