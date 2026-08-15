@@ -14,6 +14,13 @@
           - image: quay.io/openstack.kolla/nova-novncproxy:{{ image_version }}
             custom_cmds: |
               sed -i '123i\ \ \ \ \ \ \ \ expected_protos.append(\"https\")' /var/lib/kolla/venv/lib/python3.10/site-packages/nova/console/websocketproxy.py
+          - image: quay.io/openstack.kolla/zun-compute:{{ image_version }}
+            customize_marker: customize-zun-compute-cpu-stats-v1.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-cpu-stats.py
+                dest: /tmp/patch-zun-cpu-stats.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-cpu-stats.py
           - image: quay.io/openstack.kolla/zun-wsproxy:{{ image_version }}
             customize_marker: customize-zun-wsproxy-mtls-v1.done
             custom_files:
@@ -63,6 +70,13 @@
               chown root:root /dev/shm/$(hostname)_nova-novncproxy_qmanager
               chmod 644 /dev/shm/$(hostname)_nova-novncproxy_qmanager
               EOF
+          - image: quay.io/openstack.kolla/zun-compute:{{ image_version }}
+            customize_marker: customize-zun-compute-cpu-stats-v1.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-cpu-stats.py
+                dest: /tmp/patch-zun-cpu-stats.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-cpu-stats.py
           - image: quay.io/openstack.kolla/zun-wsproxy:{{ image_version }}
             customize_marker: customize-zun-wsproxy-mtls-v1.done
             custom_files:
