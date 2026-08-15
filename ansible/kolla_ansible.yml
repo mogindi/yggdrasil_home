@@ -46,11 +46,19 @@
           {{ item }}
       loop: "{{ groups['deployment_nodes'] }}"
 
+    - name: Stage CloudKitty metrics definition for configure script
+      copy:
+        src: "{{ playbook_dir }}/../scripts/kolla-ansible/cloudkitty-metrics.yml"
+        dest: /tmp/yggdrasil-cloudkitty-metrics.yml
+        mode: '0644'
+      tags: configure
+
     - name: Configure kolla-ansible
       script: "{{ playbook_dir }}/../scripts/kolla-ansible/configure.sh"
       args:
         chdir: "{{ playbook_dir }}/.."
       environment:
+        CLOUDKITTY_METRICS_FILE: /tmp/yggdrasil-cloudkitty-metrics.yml
         OPENSTACK_NETWORK_INTERFACE: "{{ openstack_network_interface }}"
         OPENSTACK_NEUTRON_EXTERNAL_INTERFACE: "{{ openstack_neutron_external_interface }}"
         OPENSTACK_KOLLA_INTERNAL_VIP_ADDRESS: "{{ openstack_kolla_internal_vip_address }}"

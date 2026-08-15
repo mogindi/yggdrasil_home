@@ -314,7 +314,12 @@ EOF
 # enabled. The raw function ledger is owned by yggdrasil_finops and is not
 # affected by this switch.
 mkdir -p etc/kolla/config/cloudkitty
-cp "$SCRIPT_DIR/cloudkitty-metrics.yml" etc/kolla/config/cloudkitty/metrics.yml
+METRICS_SOURCE="${CLOUDKITTY_METRICS_FILE:-$SCRIPT_DIR/cloudkitty-metrics.yml}"
+if [[ ! -f "$METRICS_SOURCE" ]]; then
+	echo "CloudKitty metrics definition not found: $METRICS_SOURCE" >&2
+	exit 1
+fi
+cp "$METRICS_SOURCE" etc/kolla/config/cloudkitty/metrics.yml
 if [[ "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED,,}" == "yes" || "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED,,}" == "true" ]]; then
 	cat >> etc/kolla/config/cloudkitty/metrics.yml <<'EOF'
 
