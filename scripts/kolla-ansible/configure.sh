@@ -265,6 +265,8 @@ mkdir -p etc/kolla/config/skyline/
 cat >  etc/kolla/config/skyline/skyline.yaml <<EOF
 openstack:
   service_mapping:
+    alarming: aodh
+    metric: gnocchi
     volumev3: cinder
 EOF
 
