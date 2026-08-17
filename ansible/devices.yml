@@ -20,106 +20,97 @@
           - openssl
         update_cache: yes
 
-    - name: Create Docker PKI directories
-      file:
-        path: "{{ item }}"
-        state: directory
-        owner: root
-        group: root
-        mode: '0700'
-      loop:
-        - "{{ docker_pki_root }}"
-        - "{{ docker_pki_root }}/client"
-        - "{{ docker_pki_root }}/servers"
-      when: openstack_zun_kata_enabled | default(false) | bool
+    - name: Configure Docker PKI for Kata
+      block:
+        - name: Create Docker PKI directories
+          file:
+            path: "{{ item }}"
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - "{{ docker_pki_root }}"
+            - "{{ docker_pki_root }}/client"
+            - "{{ docker_pki_root }}/servers"
 
-    - name: Generate Docker CA private key
-      command: >-
-        openssl genrsa -out {{ docker_pki_root }}/ca-key.pem 4096
-      args:
-        creates: "{{ docker_pki_root }}/ca-key.pem"
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Generate Docker CA private key
+          command: >-
+            openssl genrsa -out {{ docker_pki_root }}/ca-key.pem 4096
+          args:
+            creates: "{{ docker_pki_root }}/ca-key.pem"
 
-    - name: Generate Docker CA certificate
-      command: >-
-        openssl req -x509 -new -sha256 -days 3650
-        -key {{ docker_pki_root }}/ca-key.pem
-        -subj /CN=yggdrasil-zun-docker-ca
-        -out {{ docker_pki_root }}/ca.pem
-      args:
-        creates: "{{ docker_pki_root }}/ca.pem"
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Generate Docker CA certificate
+          command: >-
+            openssl req -x509 -new -sha256 -days 3650
+            -key {{ docker_pki_root }}/ca-key.pem
+            -subj /CN=yggdrasil-zun-docker-ca
+            -out {{ docker_pki_root }}/ca.pem
+          args:
+            creates: "{{ docker_pki_root }}/ca.pem"
 
-    - name: Write Docker client certificate extensions
-      copy:
-        dest: "{{ docker_pki_root }}/client/extensions.cnf"
-        owner: root
-        group: root
-        mode: '0600'
-        content: |
-          basicConstraints = critical,CA:FALSE
-          keyUsage = critical,digitalSignature,keyEncipherment
-          extendedKeyUsage = clientAuth
-      register: docker_client_extensions
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Write Docker client certificate extensions
+          copy:
+            dest: "{{ docker_pki_root }}/client/extensions.cnf"
+            owner: root
+            group: root
+            mode: '0600'
+            content: |
+              basicConstraints = critical,CA:FALSE
+              keyUsage = critical,digitalSignature,keyEncipherment
+              extendedKeyUsage = clientAuth
+          register: docker_client_extensions
 
-    - name: Generate Docker client private key
-      command: >-
-        openssl genrsa -out {{ docker_pki_root }}/client/key.pem 4096
-      args:
-        creates: "{{ docker_pki_root }}/client/key.pem"
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Generate Docker client private key
+          command: >-
+            openssl genrsa -out {{ docker_pki_root }}/client/key.pem 4096
+          args:
+            creates: "{{ docker_pki_root }}/client/key.pem"
 
-    - name: Check Docker client certificate lifetime
-      command: >-
-        openssl x509 -checkend 2592000 -noout
-        -in {{ docker_pki_root }}/client/cert.pem
-      register: docker_client_certificate_check
-      changed_when: false
-      failed_when: false
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Check Docker client certificate lifetime
+          command: >-
+            openssl x509 -checkend 2592000 -noout
+            -in {{ docker_pki_root }}/client/cert.pem
+          register: docker_client_certificate_check
+          changed_when: false
+          failed_when: false
 
-    - name: Generate Docker client certificate request
-      command: >-
-        openssl req -new
-        -key {{ docker_pki_root }}/client/key.pem
-        -subj /CN=zun
-        -out {{ docker_pki_root }}/client/client.csr
-      when:
-        - openstack_zun_kata_enabled | default(false) | bool
-        - docker_client_extensions.changed or docker_client_certificate_check.rc != 0
+        - name: Generate Docker client certificate request
+          command: >-
+            openssl req -new
+            -key {{ docker_pki_root }}/client/key.pem
+            -subj /CN=zun
+            -out {{ docker_pki_root }}/client/client.csr
+          when: docker_client_extensions.changed or docker_client_certificate_check.rc != 0
 
-    - name: Sign Docker client certificate
-      command: >-
-        openssl x509 -req -sha256 -days 397
-        -in {{ docker_pki_root }}/client/client.csr
-        -CA {{ docker_pki_root }}/ca.pem
-        -CAkey {{ docker_pki_root }}/ca-key.pem
-        -CAcreateserial
-        -extfile {{ docker_pki_root }}/client/extensions.cnf
-        -out {{ docker_pki_root }}/client/cert.pem
-      when:
-        - openstack_zun_kata_enabled | default(false) | bool
-        - docker_client_extensions.changed or docker_client_certificate_check.rc != 0
+        - name: Sign Docker client certificate
+          command: >-
+            openssl x509 -req -sha256 -days 397
+            -in {{ docker_pki_root }}/client/client.csr
+            -CA {{ docker_pki_root }}/ca.pem
+            -CAkey {{ docker_pki_root }}/ca-key.pem
+            -CAcreateserial
+            -extfile {{ docker_pki_root }}/client/extensions.cnf
+            -out {{ docker_pki_root }}/client/cert.pem
+          when: docker_client_extensions.changed or docker_client_certificate_check.rc != 0
 
-    - name: Generate per-host Docker server certificates
-      include_tasks: tasks/docker_server_certificate.yml
-      loop: "{{ groups['deployment_nodes'] }}"
-      loop_control:
-        loop_var: docker_server_host
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Generate per-host Docker server certificates
+          include_tasks: tasks/docker_server_certificate.yml
+          loop: "{{ groups['deployment_nodes'] }}"
+          loop_control:
+            loop_var: docker_server_host
 
-    - name: Protect Docker PKI private files
-      file:
-        path: "{{ item }}"
-        owner: root
-        group: root
-        mode: '0600'
-      loop:
-        - "{{ docker_pki_root }}/ca-key.pem"
-        - "{{ docker_pki_root }}/client/key.pem"
-        - "{{ docker_pki_root }}/ca.srl"
-      failed_when: false
+        - name: Protect Docker PKI private files
+          file:
+            path: "{{ item }}"
+            owner: root
+            group: root
+            mode: '0600'
+          loop:
+            - "{{ docker_pki_root }}/ca-key.pem"
+            - "{{ docker_pki_root }}/client/key.pem"
+            - "{{ docker_pki_root }}/ca.srl"
+          failed_when: false
       when: openstack_zun_kata_enabled | default(false) | bool
 
 - name: Set up devices
@@ -341,238 +332,224 @@
         state: directory
         mode: '0755'
 
-    - name: Resolve Kata release architecture
-      set_fact:
-        kata_release_arch: "{{ kata_architectures[ansible_architecture] | default('') }}"
+    - name: Install and validate Kata runtime
+      block:
+        - name: Resolve Kata release architecture
+          set_fact:
+            kata_release_arch: "{{ kata_architectures[ansible_architecture] | default('') }}"
+
+        - name: Validate Kata host architecture and virtualization
+          assert:
+            that:
+              - kata_release_arch | length > 0
+              - ansible_virtualization_type not in ['docker', 'lxc', 'openvz']
+            fail_msg: >-
+              Kata requires a supported CPU architecture and hardware or nested
+              virtualization; it cannot run inside an ordinary system container.
+
+        - name: Check for KVM device
+          stat:
+            path: /dev/kvm
+          register: kata_kvm_device
+
+        - name: Require KVM acceleration for Kata
+          assert:
+            that: kata_kvm_device.stat.exists
+            fail_msg: >-
+              /dev/kvm is unavailable. Enable virtualization in firmware or expose
+              nested virtualization to this deployment node before continuing.
+
+        - name: Download pinned Kata static release
+          get_url:
+            url: >-
+              https://github.com/kata-containers/kata-containers/releases/download/{{ kata_version }}/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst
+            dest: "/var/cache/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst"
+            checksum: "sha256:{{ kata_checksums[kata_release_arch] }}"
+            mode: '0644'
+            timeout: 120
+
+        - name: Create versioned Kata installation directory
+          file:
+            path: "/opt/kata-{{ kata_version }}"
+            state: directory
+            mode: '0755'
+
+        - name: Extract Kata static release
+          command: >-
+            tar --zstd -xf /var/cache/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst
+            -C /opt/kata-{{ kata_version }} --strip-components=2
+          args:
+            creates: "/opt/kata-{{ kata_version }}/bin/kata-runtime"
+
+        - name: Select installed Kata version
+          file:
+            src: "/opt/kata-{{ kata_version }}"
+            dest: /opt/kata
+            state: link
+            force: true
+
+        - name: Expose Kata runtime binaries on PATH
+          file:
+            src: "/opt/kata/bin/{{ item }}"
+            dest: "/usr/local/bin/{{ item }}"
+            state: link
+            force: true
+          loop:
+            - kata-runtime
+            - containerd-shim-kata-v2
+
+        - name: Validate Kata runtime support
+          command: /opt/kata/bin/kata-runtime check
+          changed_when: false
       when: openstack_zun_kata_enabled | default(false) | bool
 
-    - name: Validate Kata host architecture and virtualization
-      assert:
-        that:
-          - kata_release_arch | length > 0
-          - ansible_virtualization_type not in ['docker', 'lxc', 'openvz']
-        fail_msg: >-
-          Kata requires a supported CPU architecture and hardware or nested
-          virtualization; it cannot run inside an ordinary system container.
+    - name: Configure Docker for Kata and Zun
+      block:
+        - name: Read existing Docker daemon configuration
+          slurp:
+            src: /etc/docker/daemon.json
+          register: docker_daemon_configuration
+
+        - name: Register Kata runtime with Docker
+          copy:
+            dest: /etc/docker/daemon.json
+            owner: root
+            group: root
+            mode: '0644'
+            content: >-
+              {{
+                (docker_daemon_configuration.content | b64decode | from_json)
+                | combine(
+                    {'runtimes': {'kata': {'runtimeType': 'io.containerd.kata.v2'}}},
+                    recursive=True
+                  )
+                | to_nice_json
+              }}
+          notify: Restart Docker for Kata
+
+        - name: Create Docker server PKI directory
+          file:
+            path: /etc/docker/pki
+            state: directory
+            owner: root
+            group: root
+            mode: '0700'
+
+        - name: Install Docker server trust and certificate
+          copy:
+            src: "{{ item.src }}"
+            dest: "{{ item.dest }}"
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop:
+            - src: /etc/yggdrasil/zun-docker-pki/ca.pem
+              dest: /etc/docker/pki/ca.pem
+              mode: '0644'
+            - src: "/etc/yggdrasil/zun-docker-pki/servers/{{ inventory_hostname }}/cert.pem"
+              dest: /etc/docker/pki/cert.pem
+              mode: '0644'
+            - src: "/etc/yggdrasil/zun-docker-pki/servers/{{ inventory_hostname }}/key.pem"
+              dest: /etc/docker/pki/key.pem
+              mode: '0600'
+          notify: Restart Docker for Kata
+
+        - name: Create Zun Docker client PKI directory
+          file:
+            path: /etc/zun/docker-pki
+            state: directory
+            owner: root
+            group: '42463'
+            mode: '0750'
+
+        - name: Install Zun Docker client credentials
+          copy:
+            src: "{{ item.src }}"
+            dest: "{{ item.dest }}"
+            owner: root
+            group: "{{ item.group }}"
+            mode: "{{ item.mode }}"
+          loop:
+            - src: /etc/yggdrasil/zun-docker-pki/ca.pem
+              dest: /etc/zun/docker-pki/ca.pem
+              group: root
+              mode: '0644'
+            - src: /etc/yggdrasil/zun-docker-pki/client/cert.pem
+              dest: /etc/zun/docker-pki/cert.pem
+              group: root
+              mode: '0644'
+            - src: /etc/yggdrasil/zun-docker-pki/client/key.pem
+              dest: /etc/zun/docker-pki/key.pem
+              group: '42463'
+              mode: '0640'
+
+        - name: Create Docker systemd override directory
+          file:
+            path: /etc/systemd/system/docker.service.d
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Configure Docker mTLS listener for Zun
+          copy:
+            dest: /etc/systemd/system/docker.service.d/override.conf
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              [Service]
+              ExecStart=
+              ExecStart=/usr/bin/dockerd -H fd:// -H tcp://{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}:2376 --tlsverify --tlscacert=/etc/docker/pki/ca.pem --tlscert=/etc/docker/pki/cert.pem --tlskey=/etc/docker/pki/key.pem --containerd=/run/containerd/containerd.sock
+          notify: Restart Docker for Kata
+
+        - name: Apply Docker runtime and mTLS configuration
+          meta: flush_handlers
       when: openstack_zun_kata_enabled | default(false) | bool
 
-    - name: Check for KVM device
-      stat:
-        path: /dev/kvm
-      register: kata_kvm_device
-      when: openstack_zun_kata_enabled | default(false) | bool
+    - name: Verify Docker Kata integration
+      block:
+        - name: Verify Docker advertises Kata runtime
+          command:
+            argv:
+              - docker
+              - info
+              - --format
+              - "{{ '{{json .Runtimes}}' }}"
+          register: docker_runtime_info
+          changed_when: false
+          failed_when: "'kata' not in docker_runtime_info.stdout"
 
-    - name: Require KVM acceleration for Kata
-      assert:
-        that: kata_kvm_device.stat.exists
-        fail_msg: >-
-          /dev/kvm is unavailable. Enable virtualization in firmware or expose
-          nested virtualization to this deployment node before continuing.
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Verify Docker API using Zun client certificate
+          command: >-
+            docker --host tcp://{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}:2376
+            --tlsverify
+            --tlscacert /etc/zun/docker-pki/ca.pem
+            --tlscert /etc/zun/docker-pki/cert.pem
+            --tlskey /etc/zun/docker-pki/key.pem
+            version
+          changed_when: false
 
-    - name: Download pinned Kata static release
-      get_url:
-        url: >-
-          https://github.com/kata-containers/kata-containers/releases/download/{{ kata_version }}/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst
-        dest: "/var/cache/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst"
-        checksum: "sha256:{{ kata_checksums[kata_release_arch] }}"
-        mode: '0644'
-        timeout: 120
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Verify Docker API rejects clients without a certificate
+          command: >-
+            curl --fail --silent --show-error
+            --cacert /etc/zun/docker-pki/ca.pem
+            https://{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}:2376/_ping
+          register: docker_api_without_client_certificate
+          changed_when: false
+          failed_when: docker_api_without_client_certificate.rc == 0
 
-    - name: Create versioned Kata installation directory
-      file:
-        path: "/opt/kata-{{ kata_version }}"
-        state: directory
-        mode: '0755'
-      when: openstack_zun_kata_enabled | default(false) | bool
+        - name: Inspect secured Docker API listener
+          shell: "ss -ltnH 'sport = :2376'"
+          register: docker_api_listener
+          changed_when: false
+          failed_when: >-
+            (network_openstack_mgmt_ip | ansible.utils.ipaddr('address')) not in docker_api_listener.stdout
+            or '0.0.0.0:2376' in docker_api_listener.stdout
 
-    - name: Extract Kata static release
-      command: >-
-        tar --zstd -xf /var/cache/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst
-        -C /opt/kata-{{ kata_version }} --strip-components=2
-      args:
-        creates: "/opt/kata-{{ kata_version }}/bin/kata-runtime"
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Select installed Kata version
-      file:
-        src: "/opt/kata-{{ kata_version }}"
-        dest: /opt/kata
-        state: link
-        force: true
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Expose Kata runtime binaries on PATH
-      file:
-        src: "/opt/kata/bin/{{ item }}"
-        dest: "/usr/local/bin/{{ item }}"
-        state: link
-        force: true
-      loop:
-        - kata-runtime
-        - containerd-shim-kata-v2
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Validate Kata runtime support
-      command: /opt/kata/bin/kata-runtime check
-      changed_when: false
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Read existing Docker daemon configuration
-      slurp:
-        src: /etc/docker/daemon.json
-      register: docker_daemon_configuration
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Register Kata runtime with Docker
-      copy:
-        dest: /etc/docker/daemon.json
-        owner: root
-        group: root
-        mode: '0644'
-        content: >-
-          {{
-            (docker_daemon_configuration.content | b64decode | from_json)
-            | combine(
-                {'runtimes': {'kata': {'runtimeType': 'io.containerd.kata.v2'}}},
-                recursive=True
-              )
-            | to_nice_json
-          }}
-      notify: Restart Docker for Kata
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Create Docker server PKI directory
-      file:
-        path: /etc/docker/pki
-        state: directory
-        owner: root
-        group: root
-        mode: '0700'
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Install Docker server trust and certificate
-      copy:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        owner: root
-        group: root
-        mode: "{{ item.mode }}"
-      loop:
-        - src: /etc/yggdrasil/zun-docker-pki/ca.pem
-          dest: /etc/docker/pki/ca.pem
-          mode: '0644'
-        - src: "/etc/yggdrasil/zun-docker-pki/servers/{{ inventory_hostname }}/cert.pem"
-          dest: /etc/docker/pki/cert.pem
-          mode: '0644'
-        - src: "/etc/yggdrasil/zun-docker-pki/servers/{{ inventory_hostname }}/key.pem"
-          dest: /etc/docker/pki/key.pem
-          mode: '0600'
-      notify: Restart Docker for Kata
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Create Zun Docker client PKI directory
-      file:
-        path: /etc/zun/docker-pki
-        state: directory
-        owner: root
-        group: '42463'
-        mode: '0750'
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Install Zun Docker client credentials
-      copy:
-        src: "{{ item.src }}"
-        dest: "{{ item.dest }}"
-        owner: root
-        group: "{{ item.group }}"
-        mode: "{{ item.mode }}"
-      loop:
-        - src: /etc/yggdrasil/zun-docker-pki/ca.pem
-          dest: /etc/zun/docker-pki/ca.pem
-          group: root
-          mode: '0644'
-        - src: /etc/yggdrasil/zun-docker-pki/client/cert.pem
-          dest: /etc/zun/docker-pki/cert.pem
-          group: root
-          mode: '0644'
-        - src: /etc/yggdrasil/zun-docker-pki/client/key.pem
-          dest: /etc/zun/docker-pki/key.pem
-          group: '42463'
-          mode: '0640'
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Create Docker systemd override directory
-      file:
-        path: /etc/systemd/system/docker.service.d
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Configure Docker mTLS listener for Zun
-      copy:
-        dest: /etc/systemd/system/docker.service.d/override.conf
-        owner: root
-        group: root
-        mode: '0644'
-        content: |
-          [Service]
-          ExecStart=
-          ExecStart=/usr/bin/dockerd -H fd:// -H tcp://{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}:2376 --tlsverify --tlscacert=/etc/docker/pki/ca.pem --tlscert=/etc/docker/pki/cert.pem --tlskey=/etc/docker/pki/key.pem --containerd=/run/containerd/containerd.sock
-      notify: Restart Docker for Kata
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Apply Docker runtime and mTLS configuration
-      meta: flush_handlers
-
-    - name: Verify Docker advertises Kata runtime
-      command:
-        argv:
-          - docker
-          - info
-          - --format
-          - "{{ '{{json .Runtimes}}' }}"
-      register: docker_runtime_info
-      changed_when: false
-      failed_when: "'kata' not in docker_runtime_info.stdout"
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Verify Docker API using Zun client certificate
-      command: >-
-        docker --host tcp://{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}:2376
-        --tlsverify
-        --tlscacert /etc/zun/docker-pki/ca.pem
-        --tlscert /etc/zun/docker-pki/cert.pem
-        --tlskey /etc/zun/docker-pki/key.pem
-        version
-      changed_when: false
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Verify Docker API rejects clients without a certificate
-      command: >-
-        curl --fail --silent --show-error
-        --cacert /etc/zun/docker-pki/ca.pem
-        https://{{ network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}:2376/_ping
-      register: docker_api_without_client_certificate
-      changed_when: false
-      failed_when: docker_api_without_client_certificate.rc == 0
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Inspect secured Docker API listener
-      shell: "ss -ltnH 'sport = :2376'"
-      register: docker_api_listener
-      changed_when: false
-      failed_when: >-
-        (network_openstack_mgmt_ip | ansible.utils.ipaddr('address')) not in docker_api_listener.stdout
-        or '0.0.0.0:2376' in docker_api_listener.stdout
-      when: openstack_zun_kata_enabled | default(false) | bool
-
-    - name: Verify insecure Docker API is closed
-      shell: "! ss -ltnH 'sport = :2375' | grep -q ."
-      changed_when: false
+        - name: Verify insecure Docker API is closed
+          shell: "! ss -ltnH 'sport = :2375' | grep -q ."
+          changed_when: false
       when: openstack_zun_kata_enabled | default(false) | bool
 
     #- name: Run internet connectivity script
