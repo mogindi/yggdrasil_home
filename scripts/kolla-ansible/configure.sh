@@ -9,6 +9,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${OPENSTACK_ZUN_RAM_ALLOCATION_RATIO:=1.5}"
 : "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED:=no}"
 
+is_enabled() {
+	case "${1,,}" in
+		1|true|yes|on)
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
 # just sets `<key>: <value>` in globals.yml
 function set_global_config () {
 	config_key=$1
@@ -104,7 +115,7 @@ set_global_config enable_venus yes
 set_global_config enable_watcher yes
 set_global_config enable_zun "$OPENSTACK_ZUN_KATA_ENABLED"
 
-if [[ $OPENSTACK_ZUN_KATA_ENABLED == "yes" ]]; then
+if is_enabled "$OPENSTACK_ZUN_KATA_ENABLED"; then
 	set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true, "runtimes": { "kata": { "runtimeType": "io.containerd.kata.v2" } } }'
 	set_global_config zun_compute_extra_volumes '["/etc/zun/docker-pki:/etc/zun/docker-pki:ro"]'
 	set_global_config zun_wsproxy_extra_volumes '["/etc/zun/docker-pki:/etc/zun/docker-pki:ro"]'
@@ -277,7 +288,7 @@ delete_share_server_with_last_share = false
 EOF
 
 # zun
-if [[ $OPENSTACK_ZUN_KATA_ENABLED == "yes" ]]; then
+if is_enabled "$OPENSTACK_ZUN_KATA_ENABLED"; then
 	mkdir -p etc/kolla/config/zun
 	cat > etc/kolla/config/zun.conf <<'EOF'
 [DEFAULT]
@@ -322,7 +333,7 @@ if [[ ! -f "$METRICS_SOURCE" ]]; then
 	exit 1
 fi
 cp "$METRICS_SOURCE" etc/kolla/config/cloudkitty/metrics.yml
-if [[ "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED,,}" == "yes" || "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED,,}" == "true" ]]; then
+if is_enabled "$OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED"; then
 	cat >> etc/kolla/config/cloudkitty/metrics.yml <<'EOF'
 
   function.cpu.utilization:
