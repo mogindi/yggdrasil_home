@@ -323,9 +323,8 @@ cpu_allocation_ratio = $OPENSTACK_ZUN_CPU_ALLOCATION_RATIO
 ram_allocation_ratio = $OPENSTACK_ZUN_RAM_ALLOCATION_RATIO
 EOF
 
-# Keep function collection out of CloudKitty unless it is independently
-# enabled. The raw function ledger is owned by yggdrasil_finops and is not
-# affected by this switch.
+# Keep function collection and CloudKitty publication disabled unless the
+# single function rating switch is enabled.
 mkdir -p etc/kolla/config/cloudkitty
 METRICS_SOURCE="${CLOUDKITTY_METRICS_FILE:-$SCRIPT_DIR/cloudkitty-metrics.yml}"
 if [[ ! -f "$METRICS_SOURCE" ]]; then
