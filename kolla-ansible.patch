@@ -109,3 +109,153 @@ index f9c69c45d..5a41b3078 100644
  
      - name: Remove old Prometheus v2 volume
        become: true
+diff --git a/ansible/library/kolla_container.py b/ansible/library/kolla_container.py
+index 6427ea19a..5de5c21d4 100644
+--- a/ansible/library/kolla_container.py
++++ b/ansible/library/kolla_container.py
+@@ -19,2 +18,0 @@
+-# FIXME(yoctozepto): restart_policy is *not* checked in the container
+-
+@@ -130,0 +129,6 @@ options:
++  group_add:
++    description:
++      - Add supplementary groups to the container
++    required: False
++    type: list
++    default: list()
+@@ -303,0 +308 @@ def generate_module():
++        group_add=dict(required=False, type='list', default=list()),
+diff --git a/ansible/module_utils/kolla_container_worker.py b/ansible/module_utils/kolla_container_worker.py
+index d9d2bf714..6a7687ad4 100644
+--- a/ansible/module_utils/kolla_container_worker.py
++++ b/ansible/module_utils/kolla_container_worker.py
+@@ -67 +67 @@ class ContainerWorker(ABC):
+-    def check_container_differs(self):
++    def check_container_differs(self, ignore_restart_policy=False):
+@@ -73,0 +74,3 @@
++            (not ignore_restart_policy and
++             self.compare_restart_policy(container_info)) or
++            self.compare_group_add(container_info) or
+@@ -90,0 +94,6 @@
++    def compare_restart_policy(self, container_info):
++        return False
++
++    def compare_group_add(self, container_info):
++        return False
++
+diff --git a/ansible/module_utils/kolla_docker_worker.py b/ansible/module_utils/kolla_docker_worker.py
+index 4cb2d2f8e..847165786 100644
+--- a/ansible/module_utils/kolla_docker_worker.py
++++ b/ansible/module_utils/kolla_docker_worker.py
+@@ -106,0 +107,27 @@ class DockerWorker(ContainerWorker):
++    def _restart_policy(self):
++        policy = self.params.get('restart_policy')
++        if policy in (None, ''):
++            return None
++        if policy == 'oneshot':
++            policy = 'no'
++        retries = self.params.get('restart_retries') or 0
++        if policy != 'on-failure':
++            retries = 0
++        return {'Name': policy, 'MaximumRetryCount': retries}
++
++    def compare_restart_policy(self, container_info):
++        requested = self._restart_policy()
++        if requested is None:
++            return False
++        current = container_info['HostConfig'].get('RestartPolicy') or {}
++        return (requested.get('Name') != current.get('Name') or
++                requested.get('MaximumRetryCount', 0) !=
++                current.get('MaximumRetryCount', 0))
++
++    def compare_group_add(self, container_info):
++        requested = set(str(group) for group in
++                        (self.params.get('group_add') or []))
++        current = set(str(group) for group in
++                      (container_info['HostConfig'].get('GroupAdd') or []))
++        return requested != current
++
+@@ -304,3 +304,4 @@ class DockerWorker(ContainerWorker):
+             'network_mode': 'host',
+             'ipc_mode': self.params.get('ipc_mode'),
+             'cap_add': self.params.get('cap_add'),
++            'group_add': self.params.get('group_add'),
+@@ -305,0 +334,4 @@ class DockerWorker(ContainerWorker):
++        restart_policy = self._restart_policy()
++        if restart_policy is not None:
++            options['restart_policy'] = restart_policy
++
+@@ -364,1 +396,2 @@ class DockerWorker(ContainerWorker):
+-        if config_strategy == 'COPY_ONCE' or self.check_container_differs():
++        if config_strategy == 'COPY_ONCE' or self.check_container_differs(
++                ignore_restart_policy=True):
+@@ -373,2 +406,7 @@ class DockerWorker(ContainerWorker):
+-        elif config_strategy == 'COPY_ALWAYS':
+-            self.restart_container()
++        else:
++            if self.compare_restart_policy(self.get_container_info()):
++                self.dc.update_container(
++                    self.params.get('name'),
++                    restart_policy=self._restart_policy())
++            if config_strategy == 'COPY_ALWAYS':
++                self.restart_container()
+@@ -381,4 +419,9 @@ class DockerWorker(ContainerWorker):
+-        if container and self.check_container_differs():
+-            self.stop_container()
+-            self.remove_container()
+-            container = self.check_container()
++        if container:
++            if self.check_container_differs(ignore_restart_policy=True):
++                self.stop_container()
++                self.remove_container()
++                container = self.check_container()
++            elif self.compare_restart_policy(self.get_container_info()):
++                self.dc.update_container(
++                    self.params.get('name'),
++                    restart_policy=self._restart_policy())
+diff --git a/ansible/roles/neutron/defaults/main.yml b/ansible/roles/neutron/defaults/main.yml
+index 8d3dcdcfd..a69d50561 100644
+--- a/ansible/roles/neutron/defaults/main.yml
++++ b/ansible/roles/neutron/defaults/main.yml
+@@ -162,0 +163 @@ neutron_services:
++    group_add: "{{ [neutron_docker_socket_gid] if neutron_agents_wrappers | bool and kolla_container_engine == 'docker' else [] }}"
+diff --git a/ansible/roles/neutron/handlers/main.yml b/ansible/roles/neutron/handlers/main.yml
+index 454db95d2..2bbeda66b 100644
+--- a/ansible/roles/neutron/handlers/main.yml
++++ b/ansible/roles/neutron/handlers/main.yml
+@@ -252,0 +253 @@
++    group_add: "{{ service.group_add | default(omit) }}"
+diff --git a/ansible/roles/neutron/tasks/config-host.yml b/ansible/roles/neutron/tasks/config-host.yml
+index 8ad3f3d5a..01af68d86 100644
+--- a/ansible/roles/neutron/tasks/config-host.yml
++++ b/ansible/roles/neutron/tasks/config-host.yml
+@@ -1,0 +2,17 @@
++- name: Get Docker socket group ID for Neutron wrappers
++  become: true
++  ansible.builtin.stat:
++    path: /var/run/docker.sock
++  register: neutron_docker_socket_stat
++  when:
++    - neutron_agents_wrappers | bool
++    - kolla_container_engine == 'docker'
++
++- name: Set Docker socket group ID for Neutron wrappers
++  ansible.builtin.set_fact:
++    neutron_docker_socket_gid: "{{ neutron_docker_socket_stat.stat.gid }}"
++  when:
++    - neutron_agents_wrappers | bool
++    - kolla_container_engine == 'docker'
++    - neutron_docker_socket_stat.stat.exists | bool
++
+diff --git a/ansible/roles/service-check-containers/tasks/main.yml b/ansible/roles/service-check-containers/tasks/main.yml
+index f502ee62b..1b4390edb 100644
+--- a/ansible/roles/service-check-containers/tasks/main.yml
++++ b/ansible/roles/service-check-containers/tasks/main.yml
+@@ -18,0 +19 @@
++    group_add: "{{ service.group_add | default(omit) }}"
+diff --git a/ansible/roles/service-check-containers/tasks/iterated.yml b/ansible/roles/service-check-containers/tasks/iterated.yml
+index c7c210bc7..4908d3ae3 100644
+--- a/ansible/roles/service-check-containers/tasks/iterated.yml
++++ b/ansible/roles/service-check-containers/tasks/iterated.yml
+@@ -16,0 +17 @@
++    group_add: "{{ service.group_add | default(omit) }}"
