@@ -16,15 +16,32 @@ source ../scripts/openstack/image-utils.sh
 date=$(date +%Y%m%d)
 
 commands="apt update && DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Options::=--force-confdef -o DPkg::Options::=--force-confold install -y qemu-guest-agent"
+
+upload_ubuntu_noble_image() {
+  create_openstack_linux_image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img  \
+    ubuntu-noble-24.04.$date.x86_64 \
+    "$commands" \
+    "--public --property os_distro=ubuntu --property os_type=linux --property os_version=24.04 --property os_admin_user=root --property hw_qemu_guest_agent=yes"
+}
+
+case "${1:-}" in
+  "") ;;
+  --noble-only)
+    upload_ubuntu_noble_image
+    exit 0
+    ;;
+  *)
+    echo "Usage: $0 [--noble-only]" >&2
+    exit 2
+    ;;
+esac
+
 create_openstack_linux_image https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img \
   ubuntu-jammy-22.04.$date.x86_64 \
   "$commands" \
   "--public --property os_distro=ubuntu --property os_type=linux --property os_version=22.04 --property os_admin_user=root --property hw_qemu_guest_agent=yes"
 
-create_openstack_linux_image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img  \
-  ubuntu-noble-24.04.$date.x86_64 \
-  "$commands" \
-  "--public --property os_distro=ubuntu --property os_type=linux --property os_version=24.04 --property os_admin_user=root --property hw_qemu_guest_agent=yes"
+upload_ubuntu_noble_image
 
 # not running commands - no sh?
 create_openstack_linux_image https://cloud.centos.org/centos/10-stream/x86_64/images/CentOS-Stream-GenericCloud-10-latest.x86_64.qcow2 \
@@ -69,4 +86,3 @@ openstack image list -f value | grep $(echo $image_name | sed 's/\..*//g') || op
   --file $file \
   --progress \
   $image_name
-

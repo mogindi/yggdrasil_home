@@ -88,7 +88,8 @@ openstack-resources-init:
 
 openstack-images-upload:
 ifeq ($(ENV),aio)
-	@echo "AIO: skipping the default cloud image batch; Magnum uploads Fedora CoreOS 38 separately."
+	@echo "AIO: uploading Ubuntu Noble; Magnum uploads Fedora CoreOS 38 separately."
+	scripts/openstack/upload-images.sh --noble-only
 else
 	scripts/openstack/upload-images.sh
 endif
