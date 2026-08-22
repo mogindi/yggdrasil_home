@@ -328,8 +328,13 @@ Below is a complete catalog of Make targets in this repo.
 - `openstack-rgw` — initializes RGW resources.
 - `openstack-magnum` — initializes Magnum resources.
 - `openstack-manila` — initializes Manila resources.
-- `openstack-trove` — initializes Trove resources, including the MongoDB datastore. Set
-  `TROVE_MONGODB_VERSION` to override the default MongoDB version (`8.0`).
+- `openstack-trove` — initializes Trove resources and registers MongoDB when its
+  adapted guest image is available. Run `make openstack-trove-mongodb-image` first
+  to create that image. Set `TROVE_MONGODB_VERSION` to override the default MongoDB
+  version (`8.0`). The injected adapter is experimental and currently supports
+  single-node lifecycle operations only; database/user administration, backups,
+  and clusters are not included. It currently starts MongoDB without
+  authentication, so use it only in an isolated test environment.
 - `openstack-remove-test-resources` — removes test resources.
 
 ### Bundles / orchestrated targets

@@ -2,6 +2,8 @@
 
 set -xe
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # source venv
 cd workspace
 source kolla-venv/bin/activate
@@ -24,14 +26,51 @@ upload_ubuntu_noble_image() {
     "--public --property os_distro=ubuntu --property os_type=linux --property os_version=24.04 --property os_admin_user=root --property hw_qemu_guest_agent=yes"
 }
 
+upload_trove_mongodb_image() {
+  local image_name="${TROVE_MONGODB_GUEST_IMAGE_NAME:-trove-master-guest-ubuntu-noble-mongodb}"
+  local image_url="${TROVE_MONGODB_GUEST_IMAGE_URL:-https://tarballs.opendev.org/openstack/trove/images/trove-master-guest-ubuntu-noble.qcow2}"
+  local mongodb_image="${TROVE_MONGODB_CONTAINER_IMAGE:-mongo}"
+  local mongodb_version="${TROVE_MONGODB_VERSION:-8.0}"
+  local mongodb_image_ref="$mongodb_image"
+  local payload_dir="$SCRIPT_DIR/trove-mongodb"
+  local commands
+
+  if [[ ! "$image_name" =~ ^[A-Za-z0-9._-]+$ ]] || \
+     [[ ! "$mongodb_image" =~ ^[A-Za-z0-9._/@:-]+$ ]] || \
+     [[ ! "$mongodb_version" =~ ^[0-9][A-Za-z0-9._-]*$ ]]; then
+    echo "Invalid MongoDB guest image name, container image, or version" >&2
+    return 2
+  fi
+
+  if [[ "$mongodb_image" != *@* && \
+        "${mongodb_image##*/}" != *:* ]]; then
+    mongodb_image_ref="$mongodb_image:$mongodb_version"
+  fi
+
+  commands="mkdir -p /etc/trove && printf '%s\\n' '$mongodb_image_ref' > /etc/trove/mongodb-image && chmod 0644 /etc/trove/mongodb-image"
+
+  create_openstack_linux_image "$image_url" \
+    "$image_name" \
+    "$commands" \
+    "--private --property hw_rng_model=virtio --property trove_mongodb_injected=true --tag trove --tag mongodb" \
+    "" \
+    "" \
+    "$payload_dir" \
+    "/opt/guest-agent-venv/lib/python3.12/site-packages/trove/guestagent/datastore/experimental/mongodb"
+}
+
 case "${1:-}" in
   "") ;;
   --noble-only)
     upload_ubuntu_noble_image
     exit 0
     ;;
+  --trove-mongodb)
+    upload_trove_mongodb_image
+    exit 0
+    ;;
   *)
-    echo "Usage: $0 [--noble-only]" >&2
+    echo "Usage: $0 [--noble-only|--trove-mongodb]" >&2
     exit 2
     ;;
 esac

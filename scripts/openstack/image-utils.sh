@@ -43,6 +43,59 @@ run_linux_cmd_in_qcow2_image () {
 
 }
 
+copy_files_to_qcow2_image () {
+	image_path=$1
+	source_dir=$2
+	target_dir=$3
+	mnt_args=$4
+
+	if ! [[ -d $source_dir ]]; then
+		echo "Injection source directory does not exist: $source_dir" >&2
+		return 1
+	fi
+
+	mount_dir=$(mktemp -d /mnt/mod-image-XXXXXX)
+	nbd_dev=$(lsblk -d -o NAME,SIZE | awk '$2 == "0B" {print "/dev/" $1; exit}')
+	if [[ -z $nbd_dev ]]; then
+		echo "No free NBD device is available for image injection" >&2
+		rmdir "$mount_dir"
+		return 1
+	fi
+
+	cleanup_image_mount() {
+		umount "$mount_dir" >/dev/null 2>&1 || true
+		qemu-nbd --disconnect "$nbd_dev" >/dev/null 2>&1 || true
+		rm -rf "$mount_dir" || true
+	}
+
+	if ! qemu-nbd --connect="$nbd_dev" "$image_path"; then
+		cleanup_image_mount
+		return 1
+	fi
+	sleep 1
+
+	partition=$(lsblk -ln -o PATH,TYPE "$nbd_dev" | awk '$2 == "part" {print $1; exit}')
+	partition=${partition:-$nbd_dev}
+	if ! mount $mnt_args "$partition" "$mount_dir"; then
+		cleanup_image_mount
+		return 1
+	fi
+
+	if ! mkdir -p "$mount_dir/$target_dir"; then
+		cleanup_image_mount
+		return 1
+	fi
+	if ! cp -a "$source_dir"/. "$mount_dir/$target_dir"/; then
+		cleanup_image_mount
+		return 1
+	fi
+	find "$mount_dir/$target_dir" -type f -name '*.pyc' -delete
+	find "$mount_dir/$target_dir" -depth -type d -name __pycache__ -delete
+
+	sync
+	cleanup_image_mount
+}
+
 create_openstack_linux_image() {
 	image_url=$1
 	image_name=$2
@@ -50,6 +103,8 @@ create_openstack_linux_image() {
 	extra_args=$4
 	xz_decompress=$5
 	mount_args=$6
+	injection_source_dir=$7
+	injection_target_dir=$8
 
 
 	image_format=qcow2
@@ -66,6 +121,10 @@ create_openstack_linux_image() {
 			xz -d $image_name.$image_format.xz
 		fi
 		run_linux_cmd_in_qcow2_image  $image_name.$image_format "$cmd" "$mount_args"
+		if [[ -n $injection_source_dir ]]; then
+			copy_files_to_qcow2_image "$image_name.$image_format" \
+				"$injection_source_dir" "$injection_target_dir" "$mount_args"
+		fi
 		qemu-img convert $image_name.$image_format $image_name.raw
 		openstack image create $image_name --file $image_name.raw $extra_args
 		rm -f $image_name*

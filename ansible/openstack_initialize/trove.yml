@@ -33,10 +33,11 @@
           "--property hw_rng_model=virtio"
 
         image_name=$image
+        mongodb_image_name="${TROVE_MONGODB_GUEST_IMAGE_NAME:-trove-master-guest-ubuntu-noble-mongodb}"
         mongodb_version="${TROVE_MONGODB_VERSION:-8.0}"
 
         openstack image set --private  \
-            --tag trove --tag postgres --tag mysql --tag mongodb $image_name
+            --tag trove --tag postgres --tag mysql $image_name
 
         openstack keypair show --user trove testkey || openstack keypair create --public-key ~/.ssh/id_rsa.pub --user trove testkey
 
@@ -48,9 +49,14 @@
             --image-tags trove,mysql \
             --active --default
 
-        openstack datastore version show --datastore mongodb "$mongodb_version" || openstack datastore version create "$mongodb_version" mongodb mongodb "" \
-            --image-tags trove,mongodb \
-            --active --default
+        if openstack image show "$mongodb_image_name" >/dev/null 2>&1; then
+            openstack image set --private --tag trove --tag mongodb "$mongodb_image_name"
+            openstack datastore version show --datastore mongodb "$mongodb_version" || openstack datastore version create "$mongodb_version" mongodb mongodb "" \
+                --image-tags trove,mongodb \
+                --active --default
+        else
+            echo "MongoDB guest image is not uploaded; run make openstack-trove-mongodb-image to enable MongoDB"
+        fi
 
       args:
         chdir: "{{ playbook_dir }}/../.."
@@ -76,7 +82,12 @@
         . $CONFIG_DIR/admin-openrc.sh
 
         mongodb_version="${TROVE_MONGODB_VERSION:-8.0}"
-        openstack datastore version show --datastore mongodb "$mongodb_version"
+        mongodb_image_name="${TROVE_MONGODB_GUEST_IMAGE_NAME:-trove-master-guest-ubuntu-noble-mongodb}"
+        if openstack image show "$mongodb_image_name" >/dev/null 2>&1; then
+            openstack datastore version show --datastore mongodb "$mongodb_version"
+        else
+            echo "MongoDB guest image is not uploaded; skipping MongoDB datastore validation"
+        fi
 
         suffix=$RANDOM
         name=test-postgresql-$suffix
