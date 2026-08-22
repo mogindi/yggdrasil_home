@@ -1,7 +1,7 @@
-# This is an example Starter pipeline configuration
-# Use a skeleton to build, test and deploy using manual and parallel steps
-# -----
-# You can specify a custom docker image from Docker Hub as your build environment.
+# Yggdrasil Home pipeline. Security scanning is maintained in the
+# yggdrasil_security repository so ISO evidence and scanner logic have one
+# controlled home. Configure YGGDRASIL_SECURITY_REPO_URL as a secured pipeline
+# variable before enabling this pipeline.
 
 image: atlassian/default-image:3
 
@@ -9,29 +9,32 @@ pipelines:
   default:
     - parallel:
       - step:
-          name: 'Build and Test'
+          name: 'Shell validation'
           script:
-            - echo "Your build and test goes here..."
+            - git diff --check
+            - git ls-files '*.sh' | xargs -r -n1 bash -n
       - step:
-          name: 'Lint'
+          name: 'Repository validation'
           script:
-            - echo "Your linting goes here..."
+            - test -f README.md
+            - test -f Makefile
       - step:
-          name: 'Security scan'
+          name: 'ISO security baseline'
           script:
-            - echo "Your security scan goes here..."
+            - test -n "$YGGDRASIL_SECURITY_REPO_URL"
+            - git clone --depth 1 --branch "${YGGDRASIL_SECURITY_REF:-main}" "$YGGDRASIL_SECURITY_REPO_URL" .yggdrasil_security
+            - .yggdrasil_security/scripts/scan-repository.sh --repo "$BITBUCKET_CLONE_DIR" --enforce
 
-    # The following deployment steps will be executed for each pipeline run. To configure your steps and conditionally deploy see https://support.atlassian.com/bitbucket-cloud/docs/configure-bitbucket-pipelinesyml/
+    # Deployment commands must be added only after their credentials, approvals,
+    # rollback, and evidence requirements are defined.
     - step:
         name: 'Deployment to Staging'
         deployment: staging
         script:
-          - echo "Your deployment to staging script goes here..."
-          - echo "TEST_SECRET is $TEST_SECRET"
-          - expr 10 / $MY_HIDDEN_NUMBER
+          - echo "Staging deployment is intentionally not enabled in this baseline pipeline."
     - step:
         name: 'Deployment to Production'
         deployment: production
         trigger: 'manual'
         script:
-          - echo "Your deployment to production script goes here..."
+          - echo "Production deployment requires an approved release workflow."
