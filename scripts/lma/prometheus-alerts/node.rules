@@ -48,7 +48,17 @@ groups:
       description: Host network interfaces are probably sending too much data (> 100 MB/s)\n  VALUE = {{ $value }}
 
   - alert: HostUnusualDiskReadRate
-    expr: sum by (instance) (rate(node_disk_read_bytes_total[2m])) / 1024 / 1024 > 50
+    # hyper01 uses sdc3 for expected AIO workload. Exclude only that
+    # hostname/device pair; all other disks and hosts remain monitored.
+    expr: |
+      sum by (instance) (
+        rate(node_disk_read_bytes_total[2m])
+        unless on (instance, device)
+        (
+          node_disk_read_bytes_total{device="sdc3"}
+          and on (instance) node_uname_info{nodename="hyper01"}
+        )
+      ) / 1024 / 1024 > 50
     for: 5m
     labels:
       severity: warning
@@ -298,4 +308,3 @@ groups:
     annotations:
       summary: Host clock not synchronising (instance {{ $labels.instance }})
       description: Clock not synchronising.\n  VALUE = {{ $value }}
-

@@ -1,0 +1,54 @@
+rule_files:
+  - ../node.rules
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'node_uname_info{instance="10.0.10.11:9100",nodename="hyper01"}'
+        values: '1x10'
+      - series: 'node_disk_read_bytes_total{device="sdc3",instance="10.0.10.11:9100"}'
+        values: '0+3774873600x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HostUnusualDiskReadRate
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'node_uname_info{instance="10.0.10.11:9100",nodename="hyper01"}'
+        values: '1x10'
+      - series: 'node_disk_read_bytes_total{device="sdc3",instance="10.0.10.11:9100"}'
+        values: '0+3774873600x10'
+      - series: 'node_disk_read_bytes_total{device="sdc2",instance="10.0.10.11:9100"}'
+        values: '0+3774873600x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HostUnusualDiskReadRate
+        exp_alerts:
+          - exp_labels:
+              alertname: HostUnusualDiskReadRate
+              instance: 10.0.10.11:9100
+              severity: warning
+            exp_annotations:
+              summary: Host unusual disk read rate (instance 10.0.10.11:9100)
+              description: 'Disk is probably reading too much data (> 50 MB/s)\n  VALUE = 60'
+
+  - interval: 1m
+    input_series:
+      - series: 'node_uname_info{instance="10.0.10.12:9100",nodename="hyper02"}'
+        values: '1x10'
+      - series: 'node_disk_read_bytes_total{device="sdc3",instance="10.0.10.12:9100"}'
+        values: '0+3774873600x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: HostUnusualDiskReadRate
+        exp_alerts:
+          - exp_labels:
+              alertname: HostUnusualDiskReadRate
+              instance: 10.0.10.12:9100
+              severity: warning
+            exp_annotations:
+              summary: Host unusual disk read rate (instance 10.0.10.12:9100)
+              description: 'Disk is probably reading too much data (> 50 MB/s)\n  VALUE = 60'
