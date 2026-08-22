@@ -33,9 +33,10 @@
           "--property hw_rng_model=virtio"
 
         image_name=$image
+        mongodb_version="${TROVE_MONGODB_VERSION:-8.0}"
 
         openstack image set --private  \
-            --tag trove --tag postgres --tag mysql $image_name
+            --tag trove --tag postgres --tag mysql --tag mongodb $image_name
 
         openstack keypair show --user trove testkey || openstack keypair create --public-key ~/.ssh/id_rsa.pub --user trove testkey
 
@@ -45,6 +46,10 @@
 
         openstack datastore version show --datastore mysql 8.4 || openstack datastore version create 8.4 mysql mysql "" \
             --image-tags trove,mysql \
+            --active --default
+
+        openstack datastore version show --datastore mongodb "$mongodb_version" || openstack datastore version create "$mongodb_version" mongodb mongodb "" \
+            --image-tags trove,mongodb \
             --active --default
 
       args:
@@ -69,6 +74,9 @@
 
         # source admin rc
         . $CONFIG_DIR/admin-openrc.sh
+
+        mongodb_version="${TROVE_MONGODB_VERSION:-8.0}"
+        openstack datastore version show --datastore mongodb "$mongodb_version"
 
         suffix=$RANDOM
         name=test-postgresql-$suffix
