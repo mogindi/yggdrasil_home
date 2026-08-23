@@ -109,7 +109,7 @@ create_openstack_linux_image() {
 
 	image_format=qcow2
 
-	openstack image list -f value -c Name | grep $(echo $image_name | sed 's/\..*//g') || {
+	if ! openstack image show "$image_name" >/dev/null 2>&1; then
 		echo ================= $image_name =================
 		
 		rm -f $image_name*
@@ -128,7 +128,7 @@ create_openstack_linux_image() {
 		qemu-img convert $image_name.$image_format $image_name.raw
 		openstack image create $image_name --file $image_name.raw $extra_args
 		rm -f $image_name*
-	} 2>&1  # | tail -n 99999  # adding this to output all at once
+	fi 2>&1  # | tail -n 99999  # adding this to output all at once
 }
 
 

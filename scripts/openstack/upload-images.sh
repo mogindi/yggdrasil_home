@@ -4,8 +4,28 @@ set -xe
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# source venv
-cd workspace
+deployment_workspace="${TROVE_WORKSPACE:-}"
+if [[ -n "$deployment_workspace" ]]; then
+  workspace_candidates=("$deployment_workspace")
+else
+  workspace_candidates=(workspace /root/yggdrasil_home/workspace /workspace*/yggdrasil_home/workspace)
+fi
+
+deployment_workspace=""
+for candidate in "${workspace_candidates[@]}"; do
+  if [[ -f "$candidate/kolla-venv/bin/activate" && -f "$candidate/etc/kolla/admin-openrc.sh" ]]; then
+    deployment_workspace="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$deployment_workspace" ]]; then
+  echo "Could not find a Kolla workspace; set TROVE_WORKSPACE to its path" >&2
+  exit 1
+fi
+
+echo "Using Trove workspace: $deployment_workspace"
+cd "$deployment_workspace"
 source kolla-venv/bin/activate
 
 CONFIG_DIR=$(pwd)/etc/kolla
@@ -13,7 +33,7 @@ CONFIG_DIR=$(pwd)/etc/kolla
 # source admin rc
 . $CONFIG_DIR/admin-openrc.sh
 
-source ../scripts/openstack/image-utils.sh
+source "$SCRIPT_DIR/image-utils.sh"
 
 date=$(date +%Y%m%d)
 

@@ -337,6 +337,8 @@ Below is a complete catalog of Make targets in this repo.
   authentication, so use it only in an isolated test environment.
 - `openstack-trove-mongodb-test` — creates a MongoDB Trove instance, waits for
   `ACTIVE/HEALTHY`, checks port 27017, restarts it, checks health again, and deletes it.
+  It uses `m1.small` by default; override the flavor with
+  `TROVE_MONGODB_TEST_FLAVOR` when the deployment has different capacity.
 - `openstack-remove-test-resources` — removes test resources.
 
 ### Bundles / orchestrated targets
