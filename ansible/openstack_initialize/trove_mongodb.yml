@@ -40,6 +40,8 @@
         mongodb_image_name="${TROVE_MONGODB_GUEST_IMAGE_NAME:-trove-master-guest-ubuntu-noble-mongodb}"
         mongodb_flavor="${TROVE_MONGODB_TEST_FLAVOR:-m1.small}"
         openstack_timeout=60
+        config_name=""
+        config_id=""
 
         timeout "$openstack_timeout" openstack token issue -f value -c id >/dev/null
         timeout "$openstack_timeout" openstack image show "$mongodb_image_name" >/dev/null
@@ -75,6 +77,7 @@
         trap cleanup EXIT
 
         wait_for_healthy() {
+          local resource="${1:-$name}"
           local started_at
           local elapsed
           local details
@@ -83,7 +86,7 @@
           started_at=$(date +%s)
 
           while true; do
-            if details=$(timeout 45 openstack database instance show "$name" -f yaml 2>/dev/null); then
+            if details=$(timeout 45 openstack database instance show "$resource" -f yaml 2>/dev/null); then
               status=$(awk -F': ' '$1 == "status" {print $2}' <<< "$details")
               operating_status=$(awk -F': ' '$1 == "operating_status" {print $2}' <<< "$details")
 
@@ -97,14 +100,14 @@
                 return 0
               fi
 
-              echo "Trove MongoDB: status=$status operating_status=$operating_status"
+              echo "Trove MongoDB ($resource): status=$status operating_status=$operating_status"
             else
               echo "Trove API unavailable while waiting for MongoDB instance" >&2
             fi
 
             elapsed=$(( $(date +%s) - started_at ))
             if [[ $elapsed -ge $timeout_seconds ]]; then
-              timeout "$openstack_timeout" openstack database instance show "$name" || true
+              timeout "$openstack_timeout" openstack database instance show "$resource" || true
               echo "Timed out waiting for MongoDB Trove instance to become healthy" >&2
               return 1
             fi
@@ -123,7 +126,7 @@
             --is-public \
             --allowed-cidr 0.0.0.0/0
 
-        wait_for_healthy
+        wait_for_healthy "$name"
 
         addresses=$(timeout "$openstack_timeout" openstack database instance show "$name" -f value -c ip)
         if [[ -z "$addresses" || "$addresses" == "None" ]]; then
@@ -150,12 +153,131 @@
         check_mongodb_port
 
         timeout 120 openstack database instance restart "$name"
-        wait_for_healthy
+        wait_for_healthy "$name"
         addresses=$(timeout "$openstack_timeout" openstack database instance show "$name" -f value -c ip)
         check_mongodb_port
 
-        trap - EXIT
         delete_instance
+        trap - EXIT
+
+        timeout "$openstack_timeout" openstack database configuration parameter show \
+            --datastore mongodb "$mongodb_version" systemLog.verbosity >/dev/null
+
+        config_name="test-mongodb-config-$suffix"
+        config_id=$(timeout 120 openstack database configuration create \
+            "$config_name" '{"systemLog.verbosity": 1}' \
+            --datastore mongodb --datastore-version "$mongodb_version" \
+            -f value -c id)
+
+        cluster_name="test-mongodb-cluster-$suffix"
+        cluster_instance="flavor=$mongodb_flavor,volume=5,nic=net-id=$network_id"
+
+        delete_cluster() {
+          timeout "$openstack_timeout" openstack database cluster delete \
+              "$cluster_name" >/dev/null 2>&1 || \
+            timeout "$openstack_timeout" openstack database cluster force delete \
+              "$cluster_name" >/dev/null 2>&1
+        }
+
+        delete_config() {
+          local attempts=0
+          while [[ $attempts -lt 12 ]]; do
+            if timeout "$openstack_timeout" openstack database configuration delete \
+                "$config_id" >/dev/null 2>&1; then
+              return 0
+            fi
+            attempts=$((attempts + 1))
+            sleep 5
+          done
+          echo "Unable to delete MongoDB test configuration $config_id" >&2
+          return 1
+        }
+
+        cleanup_cluster() {
+          set +e
+          delete_cluster
+          if [[ -n "$config_id" ]]; then
+            delete_config
+          fi
+        }
+        trap cleanup_cluster EXIT
+
+        wait_for_cluster() {
+          local expected_count="$1"
+          local started_at
+          local elapsed
+          local details
+          local task_name
+          local instance_ids
+          local instance_id
+          started_at=$(date +%s)
+
+          while true; do
+            if details=$(timeout 45 openstack database cluster show \
+                "$cluster_name" -f json 2>/dev/null); then
+              task_name=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["cluster"]["task"]["name"])' <<< "$details")
+              if [[ "$task_name" == *ERROR* ]]; then
+                printf '%s\n' "$details"
+                echo "MongoDB Trove cluster entered an error task: $task_name" >&2
+                return 1
+              fi
+              if [[ "$task_name" == "NONE" ]]; then
+                instance_ids=$(timeout 45 openstack database cluster list instances \
+                    "$cluster_name" -f value -c id)
+                if [[ $(wc -w <<< "$instance_ids") -eq "$expected_count" ]]; then
+                  for instance_id in $instance_ids; do
+                    wait_for_healthy "$instance_id"
+                  done
+                  return 0
+                fi
+                echo "Trove MongoDB cluster has $(wc -w <<< "$instance_ids")/$expected_count members"
+              else
+                echo "Trove MongoDB cluster task=$task_name"
+              fi
+            else
+              echo "Trove API unavailable while waiting for MongoDB cluster" >&2
+            fi
+
+            elapsed=$(( $(date +%s) - started_at ))
+            if [[ $elapsed -ge $timeout_seconds ]]; then
+              timeout "$openstack_timeout" openstack database cluster show \
+                "$cluster_name" || true
+              echo "Timed out waiting for MongoDB Trove cluster" >&2
+              return 1
+            fi
+            sleep "$sleep_time"
+          done
+        }
+
+        timeout 120 openstack database cluster create "$cluster_name" \
+            mongodb "$mongodb_version" \
+            --instance "$cluster_instance" \
+            --instance "$cluster_instance" \
+            --configuration "$config_id"
+
+        wait_for_cluster 2
+
+        timeout 120 openstack database configuration set "$config_id" \
+            '{"systemLog.verbosity": 2}' >/dev/null
+        wait_for_cluster 2
+
+        timeout 120 openstack database cluster grow "$cluster_name" \
+            --instance "$cluster_instance"
+        wait_for_cluster 3
+
+        cluster_instance_ids=($(timeout 45 openstack database cluster list instances \
+            "$cluster_name" -f value -c id))
+        cluster_instance_count=$(printf '%s\n' "${cluster_instance_ids[@]}" | awk 'NF {count++} END {print count+0}')
+        if [[ $cluster_instance_count -ne 3 ]]; then
+          echo "Expected three MongoDB cluster instances before shrink" >&2
+          exit 1
+        fi
+        timeout 120 openstack database cluster shrink "$cluster_name" \
+            "${cluster_instance_ids[0]}"
+        wait_for_cluster 2
+
+        cleanup_cluster
+        trap - EXIT
       args:
         chdir: "{{ playbook_dir }}/../.."
         executable: /bin/bash

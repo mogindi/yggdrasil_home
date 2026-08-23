@@ -165,6 +165,15 @@ cat > etc/kolla/config/trove.conf <<EOF
 [DEFAULT]
 max_accepted_volume_size = 100
 
+[mongodb]
+# Use the injected replica-set controller instead of Trove's sharded MongoDB
+# strategy.  This keeps cluster creation to the requested member count.
+api_strategy = trove_yggdrasil_mongodb.api.MongoDbAPIStrategy
+taskmanager_strategy = trove_yggdrasil_mongodb.taskmanager.MongoDbTaskManagerStrategy
+guestagent_strategy = trove_yggdrasil_mongodb.guestagent.MongoDbGuestAgentStrategy
+cluster_support = true
+cluster_secure = false
+
 #[oslo_messaging_rabbit]
 #rabbit_quorum_queue = false
 #amqp_durable_queues = true

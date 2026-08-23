@@ -1,0 +1,180 @@
+{
+    "configuration-parameters": [
+        {
+            "name": "systemLog.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.accessControl.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.command.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.control.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.geo.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.index.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.network.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.query.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.replication.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.sharding.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.storage.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.storage.journal.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.component.write.verbosity",
+            "restart_required": true,
+            "min": 0,
+            "max": 5,
+            "type": "integer"
+        },
+        {
+            "name": "systemLog.quiet",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "systemLog.traceAllExceptions",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "net.maxIncomingConnections",
+            "restart_required": true,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "net.wireObjectCheck",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "net.ipv6",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "security.javascriptEnabled",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "operationProfiling.slowOpThresholdMs",
+            "restart_required": true,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "operationProfiling.mode",
+            "restart_required": true,
+            "type": "string"
+        },
+        {
+            "name": "storage.directoryPerDB",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "storage.syncPeriodSecs",
+            "restart_required": true,
+            "min": 0,
+            "type": "integer"
+        },
+        {
+            "name": "storage.engine",
+            "restart_required": true,
+            "type": "string"
+        },
+        {
+            "name": "storage.wiredTiger.engineConfig.cacheSizeGB",
+            "restart_required": true,
+            "min": 0,
+            "type": "float"
+        },
+        {
+            "name": "storage.wiredTiger.engineConfig.journalCompressor",
+            "restart_required": true,
+            "type": "string"
+        },
+        {
+            "name": "storage.wiredTiger.collectionConfig.blockCompressor",
+            "restart_required": true,
+            "type": "string"
+        },
+        {
+            "name": "storage.wiredTiger.indexConfig.prefixCompression",
+            "restart_required": true,
+            "type": "boolean"
+        },
+        {
+            "name": "replication.oplogSizeMB",
+            "restart_required": true,
+            "min": 990,
+            "type": "integer"
+        }
+    ]
+}

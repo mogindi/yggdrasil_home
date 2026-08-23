@@ -52,6 +52,36 @@
               sed -i 's/\[Service\]/StartLimitIntervalSec=500\nStartLimitBurst=5\n[Service]\nRestart=on-failure\nRestartSec=5s/g' \
               /var/lib/kolla/venv/lib/python3.10/site-packages/magnum/drivers/common/templates/kubernetes/fragments/configure-etcd.sh
               pip uninstall -y magnum-cluster-api
+          - image: quay.io/openstack.kolla/trove-api:{{ image_version }}
+            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            custom_files:
+              - src: scripts/openstack/trove-mongodb/controller/__init__.py
+                dest: /tmp/trove-mongodb-controller-init.py
+              - src: scripts/openstack/trove-mongodb/controller/api.py
+                dest: /tmp/trove-mongodb-controller-api.py
+            custom_cmds: |
+              trove_site=\$(find /var/lib/kolla/venv/lib -maxdepth 2 -type d -name site-packages -print -quit)
+              install -d \$trove_site/trove_yggdrasil_mongodb
+              cp /tmp/trove-mongodb-controller-init.py \$trove_site/trove_yggdrasil_mongodb/__init__.py
+              cp /tmp/trove-mongodb-controller-api.py \$trove_site/trove_yggdrasil_mongodb/api.py
+          - image: quay.io/openstack.kolla/trove-taskmanager:{{ image_version }}
+            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            custom_files:
+              - src: scripts/openstack/trove-mongodb/controller/__init__.py
+                dest: /tmp/trove-mongodb-controller-init.py
+              - src: scripts/openstack/trove-mongodb/controller/api.py
+                dest: /tmp/trove-mongodb-controller-api.py
+              - src: scripts/openstack/trove-mongodb/controller/guestagent.py
+                dest: /tmp/trove-mongodb-controller-guestagent.py
+              - src: scripts/openstack/trove-mongodb/controller/taskmanager.py
+                dest: /tmp/trove-mongodb-controller-taskmanager.py
+            custom_cmds: |
+              trove_site=\$(find /var/lib/kolla/venv/lib -maxdepth 2 -type d -name site-packages -print -quit)
+              install -d \$trove_site/trove_yggdrasil_mongodb
+              cp /tmp/trove-mongodb-controller-init.py \$trove_site/trove_yggdrasil_mongodb/__init__.py
+              cp /tmp/trove-mongodb-controller-api.py \$trove_site/trove_yggdrasil_mongodb/api.py
+              cp /tmp/trove-mongodb-controller-guestagent.py \$trove_site/trove_yggdrasil_mongodb/guestagent.py
+              cp /tmp/trove-mongodb-controller-taskmanager.py \$trove_site/trove_yggdrasil_mongodb/taskmanager.py
       when: (openstack_release|string) != '2025.2'
 
     - name: Set images fact
@@ -84,6 +114,36 @@
                 dest: /tmp/patch-zun-wsproxy-mtls.py
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-zun-wsproxy-mtls.py
+          - image: quay.io/openstack.kolla/trove-api:{{ image_version }}
+            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            custom_files:
+              - src: scripts/openstack/trove-mongodb/controller/__init__.py
+                dest: /tmp/trove-mongodb-controller-init.py
+              - src: scripts/openstack/trove-mongodb/controller/api.py
+                dest: /tmp/trove-mongodb-controller-api.py
+            custom_cmds: |
+              trove_site=\$(find /var/lib/kolla/venv/lib -maxdepth 2 -type d -name site-packages -print -quit)
+              install -d \$trove_site/trove_yggdrasil_mongodb
+              cp /tmp/trove-mongodb-controller-init.py \$trove_site/trove_yggdrasil_mongodb/__init__.py
+              cp /tmp/trove-mongodb-controller-api.py \$trove_site/trove_yggdrasil_mongodb/api.py
+          - image: quay.io/openstack.kolla/trove-taskmanager:{{ image_version }}
+            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            custom_files:
+              - src: scripts/openstack/trove-mongodb/controller/__init__.py
+                dest: /tmp/trove-mongodb-controller-init.py
+              - src: scripts/openstack/trove-mongodb/controller/api.py
+                dest: /tmp/trove-mongodb-controller-api.py
+              - src: scripts/openstack/trove-mongodb/controller/guestagent.py
+                dest: /tmp/trove-mongodb-controller-guestagent.py
+              - src: scripts/openstack/trove-mongodb/controller/taskmanager.py
+                dest: /tmp/trove-mongodb-controller-taskmanager.py
+            custom_cmds: |
+              trove_site=\$(find /var/lib/kolla/venv/lib -maxdepth 2 -type d -name site-packages -print -quit)
+              install -d \$trove_site/trove_yggdrasil_mongodb
+              cp /tmp/trove-mongodb-controller-init.py \$trove_site/trove_yggdrasil_mongodb/__init__.py
+              cp /tmp/trove-mongodb-controller-api.py \$trove_site/trove_yggdrasil_mongodb/api.py
+              cp /tmp/trove-mongodb-controller-guestagent.py \$trove_site/trove_yggdrasil_mongodb/guestagent.py
+              cp /tmp/trove-mongodb-controller-taskmanager.py \$trove_site/trove_yggdrasil_mongodb/taskmanager.py
       when: (openstack_release|string) == '2025.2'
 
     - name: Pull images

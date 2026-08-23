@@ -56,6 +56,9 @@
         mongodb_image_name="${TROVE_MONGODB_GUEST_IMAGE_NAME:-trove-master-guest-ubuntu-noble-mongodb}"
         mongodb_version="${TROVE_MONGODB_VERSION:-8.0}"
         mongodb_repl_strategy="${TROVE_MONGODB_REPL_STRATEGY:-none}"
+        mongodb_config_rules="/tmp/trove-mongodb-validation-rules.json"
+        docker cp "{{ playbook_dir }}/../../scripts/openstack/trove-mongodb/validation-rules.json" \
+            "trove_taskmanager:$mongodb_config_rules"
 
         openstack image set --private  \
             --tag trove --tag postgres --tag mysql $image_name
@@ -76,6 +79,11 @@
                 --image-tags trove,mongodb \
                 --repl-strategy "$mongodb_repl_strategy" \
                 --active --default
+            docker exec trove_taskmanager trove-manage \
+                db_remove_datastore_config_parameters mongodb "$mongodb_version"
+            docker exec trove_taskmanager trove-manage \
+                db_load_datastore_config_parameters mongodb "$mongodb_version" \
+                "$mongodb_config_rules"
         else
             echo "MongoDB guest image is not uploaded; run make openstack-trove-mongodb-image to enable MongoDB"
         fi

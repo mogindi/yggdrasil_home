@@ -331,13 +331,17 @@ Below is a complete catalog of Make targets in this repo.
 - `openstack-trove` — initializes Trove resources and registers MongoDB when its
   adapted guest image is available. Run `make openstack-trove-mongodb-image` first
   to create that image. Set `TROVE_MONGODB_VERSION` to override the default MongoDB
-  version (`8.0`). The injected adapter is experimental and currently supports
-  single-node lifecycle operations only; database/user administration, backups,
-  and clusters are not included. It currently starts MongoDB without
-  authentication, so use it only in an isolated test environment.
+  version (`8.0`). The injected adapter is experimental and supports standalone
+  lifecycle/configuration operations plus unauthenticated MongoDB replica-set
+  clusters with two or more members. Cluster configuration changes are applied
+  with a rolling restart when Trove marks them restart-required; clusters can be
+  grown and shrunk while retaining at least two members. Database/user
+  administration, backups, and restore snapshots are not included, and
+  authentication is disabled, so use it only in an isolated test environment.
 - `openstack-trove-mongodb-test` — creates a MongoDB Trove instance, waits for
-  `ACTIVE/HEALTHY`, checks port 27017, restarts it, checks health again, and deletes it.
-  It uses `m1.small` by default; override the flavor with
+  `ACTIVE/HEALTHY`, checks port 27017, restarts it, then creates a two-member
+  replica set, updates its configuration, grows it to three members, shrinks it
+  back to two, and cleans up. It uses `m1.small` by default; override the flavor with
   `TROVE_MONGODB_TEST_FLAVOR` when the deployment has different capacity.
 - `openstack-remove-test-resources` — removes test resources.
 
