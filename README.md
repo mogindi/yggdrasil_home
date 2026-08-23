@@ -335,6 +335,8 @@ Below is a complete catalog of Make targets in this repo.
   single-node lifecycle operations only; database/user administration, backups,
   and clusters are not included. It currently starts MongoDB without
   authentication, so use it only in an isolated test environment.
+- `openstack-trove-mongodb-test` — creates a MongoDB Trove instance, waits for
+  `ACTIVE/HEALTHY`, checks port 27017, restarts it, checks health again, and deletes it.
 - `openstack-remove-test-resources` — removes test resources.
 
 ### Bundles / orchestrated targets

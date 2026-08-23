@@ -118,6 +118,9 @@ openstack-trove:
 openstack-trove-mongodb-image:
 	scripts/openstack/upload-images.sh --trove-mongodb
 
+openstack-trove-mongodb-test:
+	ansible-playbook ansible/openstack_initialize/trove_mongodb.yml $(ARGS)
+
 openstack-remove-test-resources:
 	scripts/tests/remove-all.sh
 
