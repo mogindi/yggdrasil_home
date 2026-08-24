@@ -42,6 +42,7 @@
         openstack_timeout=60
         config_name=""
         config_id=""
+        cluster_name=""
 
         timeout "$openstack_timeout" openstack token issue -f value -c id >/dev/null
         timeout "$openstack_timeout" openstack image show "$mongodb_image_name" >/dev/null
@@ -70,9 +71,35 @@
             timeout "$openstack_timeout" openstack database instance force delete "$name" >/dev/null 2>&1
         }
 
+        delete_cluster() {
+          if [[ -n "$cluster_name" ]]; then
+            timeout "$openstack_timeout" openstack database cluster delete \
+                "$cluster_name" >/dev/null 2>&1 || \
+              timeout "$openstack_timeout" openstack database cluster force delete \
+                "$cluster_name" >/dev/null 2>&1
+          fi
+        }
+
+        delete_config() {
+          [[ -n "$config_id" ]] || return 0
+          local attempts=0
+          while [[ $attempts -lt 60 ]]; do
+            if timeout "$openstack_timeout" openstack database configuration delete \
+                "$config_id" >/dev/null 2>&1; then
+              return 0
+            fi
+            attempts=$((attempts + 1))
+            sleep 5
+          done
+          echo "Unable to delete MongoDB test configuration $config_id" >&2
+          return 1
+        }
+
         cleanup() {
           set +e
+          delete_cluster
           delete_instance
+          delete_config
         }
         trap cleanup EXIT
 
@@ -116,6 +143,15 @@
           done
         }
 
+        timeout "$openstack_timeout" openstack database configuration parameter show \
+            --datastore mongodb "$mongodb_version" systemLog.verbosity >/dev/null
+
+        config_name="test-mongodb-config-$suffix"
+        config_id=$(timeout 120 openstack database configuration create \
+            "$config_name" '{"systemLog.verbosity": 1}' \
+            --datastore mongodb --datastore-version "$mongodb_version" \
+            -f value -c id)
+
         timeout 120 openstack database instance create "$name" \
             --flavor "$mongodb_flavor" \
             --size 5 \
@@ -136,8 +172,14 @@
         fi
 
         check_mongodb_port() {
+          local endpoints="${1:-}"
           local ip
-          local normalized_addresses="${addresses//,/ }"
+          local normalized_addresses="${endpoints//,/ }"
+
+          if [[ -z "$endpoints" || "$endpoints" == "None" ]]; then
+            echo "MongoDB instance did not expose an IP address" >&2
+            return 1
+          fi
 
           for ip in $normalized_addresses; do
             if [[ "$ip" != "None" ]] && timeout 10 bash -c ": </dev/tcp/$ip/27017"; then
@@ -146,61 +188,89 @@
             fi
           done
 
-          echo "MongoDB was not reachable at any advertised address: $addresses" >&2
+          echo "MongoDB was not reachable at any advertised address: $endpoints" >&2
           return 1
         }
 
-        check_mongodb_port
+        check_mongodb_port "$addresses"
+
+        wait_for_configuration_instances() {
+          local expected_count="$1"
+          local started_at
+          local elapsed
+          local instance_ids
+          local instance_id
+          started_at=$(date +%s)
+
+          while true; do
+            if instance_ids=$(timeout 45 openstack database configuration instances \
+                "$config_id" -f value -c id 2>/dev/null); then
+              if [[ $(wc -w <<< "$instance_ids") -eq "$expected_count" ]]; then
+                for instance_id in $instance_ids; do
+                  wait_for_healthy "$instance_id"
+                done
+                return 0
+              fi
+              echo "MongoDB configuration is attached to $(wc -w <<< "$instance_ids")/$expected_count instances"
+            else
+              echo "Trove API unavailable while listing MongoDB configuration instances" >&2
+            fi
+
+            elapsed=$(( $(date +%s) - started_at ))
+            if [[ $elapsed -ge $timeout_seconds ]]; then
+              timeout 45 openstack database configuration instances \
+                "$config_id" || true
+              echo "Timed out waiting for MongoDB configuration attachment state" >&2
+              return 1
+            fi
+            sleep "$sleep_time"
+          done
+        }
 
         timeout 120 openstack database instance restart "$name"
         wait_for_healthy "$name"
         addresses=$(timeout "$openstack_timeout" openstack database instance show "$name" -f value -c ip)
-        check_mongodb_port
+        check_mongodb_port "$addresses"
+
+        # Exercise configuration attachment and detachment on a standalone
+        # instance.  Restart-required MongoDB settings are intentionally
+        # applied by the explicit restart here; cluster updates below use
+        # the rolling path.
+        timeout 120 openstack database configuration attach "$name" "$config_id"
+        timeout 120 openstack database instance restart "$name"
+        wait_for_healthy "$name"
+        addresses=$(timeout "$openstack_timeout" openstack database instance show "$name" -f value -c ip)
+        check_mongodb_port "$addresses"
+
+        wait_for_configuration_instances 1
+
+        timeout 120 openstack database configuration detach "$name"
+        timeout 120 openstack database instance restart "$name"
+        wait_for_healthy "$name"
+        addresses=$(timeout "$openstack_timeout" openstack database instance show "$name" -f value -c ip)
+        check_mongodb_port "$addresses"
+        wait_for_configuration_instances 0
 
         delete_instance
-        trap - EXIT
-
-        timeout "$openstack_timeout" openstack database configuration parameter show \
-            --datastore mongodb "$mongodb_version" systemLog.verbosity >/dev/null
-
-        config_name="test-mongodb-config-$suffix"
-        config_id=$(timeout 120 openstack database configuration create \
-            "$config_name" '{"systemLog.verbosity": 1}' \
-            --datastore mongodb --datastore-version "$mongodb_version" \
-            -f value -c id)
-
         cluster_name="test-mongodb-cluster-$suffix"
         cluster_instance="flavor=$mongodb_flavor,volume=5,nic=net-id=$network_id"
 
-        delete_cluster() {
-          timeout "$openstack_timeout" openstack database cluster delete \
-              "$cluster_name" >/dev/null 2>&1 || \
-            timeout "$openstack_timeout" openstack database cluster force delete \
-              "$cluster_name" >/dev/null 2>&1
-        }
-
-        delete_config() {
-          local attempts=0
-          while [[ $attempts -lt 12 ]]; do
-            if timeout "$openstack_timeout" openstack database configuration delete \
-                "$config_id" >/dev/null 2>&1; then
-              return 0
-            fi
-            attempts=$((attempts + 1))
-            sleep 5
+        check_instance_ports() {
+          local instance_id
+          local instance_addresses
+          for instance_id in "$@"; do
+            instance_addresses=$(timeout "$openstack_timeout" \
+              openstack database instance show "$instance_id" -f value -c ip)
+            check_mongodb_port "$instance_addresses"
           done
-          echo "Unable to delete MongoDB test configuration $config_id" >&2
-          return 1
         }
 
-        cleanup_cluster() {
-          set +e
-          delete_cluster
-          if [[ -n "$config_id" ]]; then
-            delete_config
-          fi
+        check_visible_cluster_ports() {
+          local visible_instance_ids
+          visible_instance_ids=$(timeout 45 openstack database cluster list instances \
+            "$cluster_name" -f value -c id)
+          check_instance_ports $visible_instance_ids
         }
-        trap cleanup_cluster EXIT
 
         wait_for_cluster() {
           local expected_count="$1"
@@ -256,25 +326,60 @@
             --configuration "$config_id"
 
         wait_for_cluster 2
+        wait_for_configuration_instances 2
+        check_visible_cluster_ports
+
+        replica_instances=$(timeout 45 openstack database cluster show \
+            "$cluster_name" -f json)
+        replica_member_count=$(python3 -c 'import json,sys; data=json.load(sys.stdin)["cluster"]["instances"]; print(sum(1 for item in data if item.get("type") == "member"))' <<< "$replica_instances")
+        replica_router_count=$(python3 -c 'import json,sys; data=json.load(sys.stdin)["cluster"]["instances"]; print(sum(1 for item in data if item.get("type") == "query_router"))' <<< "$replica_instances")
+        if [[ "$replica_member_count" -ne 2 || "$replica_router_count" -ne 0 ]]; then
+          printf '%s\n' "$replica_instances"
+          echo "Expected a two-member replica set with no query routers" >&2
+          exit 1
+        fi
 
         timeout 120 openstack database configuration set "$config_id" \
             '{"systemLog.verbosity": 2}' >/dev/null
         wait_for_cluster 2
+        wait_for_configuration_instances 2
+        check_visible_cluster_ports
 
         timeout 120 openstack database cluster grow "$cluster_name" \
+            --instance "$cluster_instance" \
             --instance "$cluster_instance"
-        wait_for_cluster 3
+        wait_for_cluster 4
+        wait_for_configuration_instances 4
+        check_visible_cluster_ports
+
+        timeout 120 openstack database configuration set "$config_id" \
+            '{"systemLog.verbosity": 3}' >/dev/null
+        wait_for_cluster 4
+        wait_for_configuration_instances 4
+        check_visible_cluster_ports
 
         cluster_instance_ids=($(timeout 45 openstack database cluster list instances \
             "$cluster_name" -f value -c id))
         cluster_instance_count=$(printf '%s\n' "${cluster_instance_ids[@]}" | awk 'NF {count++} END {print count+0}')
-        if [[ $cluster_instance_count -ne 3 ]]; then
-          echo "Expected three MongoDB cluster instances before shrink" >&2
+        if [[ $cluster_instance_count -ne 4 ]]; then
+          echo "Expected four MongoDB cluster instances before shrink" >&2
           exit 1
         fi
         timeout 120 openstack database cluster shrink "$cluster_name" \
-            "${cluster_instance_ids[0]}"
+            "${cluster_instance_ids[0]}" "${cluster_instance_ids[1]}"
         wait_for_cluster 2
+        wait_for_configuration_instances 2
+        check_visible_cluster_ports
+
+        cluster_instance_ids=($(timeout 45 openstack database cluster list instances \
+            "$cluster_name" -f value -c id))
+        if timeout 120 openstack database cluster shrink "$cluster_name" \
+            "${cluster_instance_ids[0]}" >/dev/null 2>&1; then
+          echo "Replica-set shrink below two members unexpectedly succeeded" >&2
+          exit 1
+        fi
+        wait_for_cluster 2
+        wait_for_configuration_instances 2
 
         # Keep the configuration group for the sharded-cluster exercise, but
         # remove the replica-set cluster before allocating the larger topology.
@@ -292,6 +397,8 @@
           echo "Timed out waiting for the replica-set test cluster deletion" >&2
           exit 1
         fi
+        cluster_name=""
+        wait_for_configuration_instances 0
         cluster_name="test-mongodb-sharded-$suffix"
         sharded_instance="flavor=$mongodb_flavor,volume=5,nic=net-id=$network_id"
         timeout 120 openstack database cluster create "$cluster_name" \
@@ -304,6 +411,14 @@
         # The public cluster view exposes shard members and routers; config
         # servers remain management-only.  That is 3 visible nodes initially.
         wait_for_cluster 3
+        wait_for_configuration_instances 5
+        check_visible_cluster_ports
+
+        timeout 120 openstack database configuration set "$config_id" \
+            '{"systemLog.verbosity": 4}' >/dev/null
+        wait_for_cluster 3
+        wait_for_configuration_instances 5
+        check_visible_cluster_ports
 
         shard_member_a="${cluster_name}-new-shard-a"
         shard_member_b="${cluster_name}-new-shard-b"
@@ -311,10 +426,14 @@
             --instance "${sharded_instance},type=replica,name=$shard_member_a" \
             --instance "${sharded_instance},type=replica,name=$shard_member_b,related_to=$shard_member_a"
         wait_for_cluster 5
+        wait_for_configuration_instances 7
+        check_visible_cluster_ports
 
         timeout 120 openstack database cluster grow "$cluster_name" \
             --instance "${sharded_instance},type=query_router"
         wait_for_cluster 6
+        wait_for_configuration_instances 8
+        check_visible_cluster_ports
 
         sharded_instances=$(timeout 45 openstack database cluster show \
             "$cluster_name" -f json)
@@ -332,11 +451,56 @@
           echo "Expected the added MongoDB shard to have two members" >&2
           exit 1
         fi
+
+        router_ids=($(python3 -c 'import json,sys; data=json.load(sys.stdin)["cluster"]["instances"]; print("\n".join(item["id"] for item in data if item.get("type") == "query_router"))' <<< "$sharded_instances"))
+        router_count=$(printf '%s\n' "${router_ids[@]}" | awk 'NF {count++} END {print count+0}')
+        if [[ $router_count -ne 2 ]]; then
+          printf '%s\n' "$sharded_instances"
+          echo "Expected two MongoDB query routers after grow" >&2
+          exit 1
+        fi
+
+        # A shard is an atomic management unit.  The API must reject a
+        # partial removal without changing the live topology.
+        if timeout 120 openstack database cluster shrink "$cluster_name" \
+            "${second_shard_members[0]}" >/dev/null 2>&1; then
+          echo "Partial MongoDB shard shrink unexpectedly succeeded" >&2
+          exit 1
+        fi
+        wait_for_cluster 6
+        wait_for_configuration_instances 8
+
+        # Remove one router and verify that one remains available.
+        timeout 120 openstack database cluster shrink "$cluster_name" \
+            "${router_ids[0]}"
+        wait_for_cluster 5
+        wait_for_configuration_instances 7
+        check_visible_cluster_ports
+
+        sharded_instances=$(timeout 45 openstack database cluster show \
+            "$cluster_name" -f json)
+        router_ids=($(python3 -c 'import json,sys; data=json.load(sys.stdin)["cluster"]["instances"]; print("\n".join(item["id"] for item in data if item.get("type") == "query_router"))' <<< "$sharded_instances"))
+        router_count=$(printf '%s\n' "${router_ids[@]}" | awk 'NF {count++} END {print count+0}')
+        if [[ $router_count -ne 1 ]]; then
+          printf '%s\n' "$sharded_instances"
+          echo "Expected one MongoDB query router after shrink" >&2
+          exit 1
+        fi
+        if timeout 120 openstack database cluster shrink "$cluster_name" \
+            "${router_ids[0]}" >/dev/null 2>&1; then
+          echo "Removing the last MongoDB query router unexpectedly succeeded" >&2
+          exit 1
+        fi
+        wait_for_cluster 5
+        wait_for_configuration_instances 7
+
         timeout 120 openstack database cluster shrink "$cluster_name" \
             "${second_shard_members[@]}"
-        wait_for_cluster 4
+        wait_for_cluster 3
+        wait_for_configuration_instances 5
+        check_visible_cluster_ports
 
-        cleanup_cluster
+        cleanup
         trap - EXIT
       args:
         chdir: "{{ playbook_dir }}/../.."

@@ -343,12 +343,14 @@ Below is a complete catalog of Make targets in this repo.
   when Trove marks them restart-required. Database/user administration,
   backups, and restore snapshots are not included, and authentication is
   disabled, so use it only in an isolated test environment.
-- `openstack-trove-mongodb-test` — creates a MongoDB Trove instance, waits for
-  `ACTIVE/HEALTHY`, checks port 27017, restarts it, then creates a two-member
-  replica set, updates its configuration, grows it to three members, shrinks it
-  back to two, creates and grows a sharded cluster, and removes its extra shard.
-  It uses `m1.small` by default; override the flavor with
-  `TROVE_MONGODB_TEST_FLAVOR` when the deployment has different capacity.
+- `openstack-trove-mongodb-test` — exercises the supported MongoDB matrix:
+  standalone lifecycle and port reachability, configuration attach/detach,
+  restart-required configuration changes, replica-set rolling updates and
+  multi-member grow/shrink, and sharded config-server, shard, and query-router
+  creation, rolling updates, scaling, reachability, router removal, complete
+  shard removal, and invalid partial-removal guards. It uses `m1.small` by
+  default; override the flavor with `TROVE_MONGODB_TEST_FLAVOR` when the
+  deployment has different capacity.
 - `openstack-remove-test-resources` — removes test resources.
 
 ### Bundles / orchestrated targets
