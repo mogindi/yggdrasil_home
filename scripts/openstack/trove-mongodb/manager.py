@@ -6,7 +6,7 @@ from trove.guestagent.datastore.experimental.mongodb import service
 
 
 class Manager(manager.Manager):
-    """Lifecycle, configuration, and replica-set operations."""
+    """Lifecycle, configuration, and MongoDB topology operations."""
 
     def __init__(self):
         super(Manager, self).__init__("mongodb")
@@ -37,6 +37,12 @@ class Manager(manager.Manager):
     def initialize_replica_set(self, context, members):
         return self.app.initialize_replica_set(members)
 
+    def prep_primary(self, context):
+        return self.app.prep_primary()
+
+    def add_members(self, context, members):
+        return self.app.add_members(members)
+
     def add_replica_members(self, context, members):
         return self.app.add_replica_members(members)
 
@@ -45,3 +51,24 @@ class Manager(manager.Manager):
 
     def replica_set_status(self, context):
         return self.app.replica_set_status()
+
+    def add_config_servers(self, context, config_servers):
+        return self.app.add_config_servers(config_servers)
+
+    def add_shard(self, context, replica_set_name, replica_set_member):
+        return self.app.add_shard(replica_set_name, replica_set_member)
+
+    def remove_shard(self, context, replica_set_name):
+        return self.app.remove_shard(replica_set_name)
+
+    def is_shard_active(self, context, replica_set_name):
+        return self.app.is_shard_active(replica_set_name)
+
+    def get_replica_set_name(self, context):
+        return self.app.get_replica_set_name()
+
+    def get_key(self, context):
+        return self.app.get_key()
+
+    def cluster_complete(self, context):
+        return self.app.cluster_complete()

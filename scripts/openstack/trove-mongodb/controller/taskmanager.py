@@ -1,4 +1,4 @@
-"""Trove task-manager strategy for MongoDB replica sets."""
+"""Trove task-manager strategy for MongoDB topologies."""
 
 import time
 
@@ -27,6 +27,17 @@ class MongoDbTaskManagerStrategy(base.BaseTaskManagerStrategy):
     @property
     def task_manager_cluster_tasks_class(self):
         return MongoDbClusterTasks
+
+    @property
+    def task_manager_manager_actions(self):
+        return {"add_shard_cluster": self._manager_add_shard}
+
+    def _manager_add_shard(self, context, cluster_id, shard_id,
+                           replica_set_name):
+        cluster_tasks = MongoDbClusterTasks.load(
+            context, cluster_id, MongoDbClusterTasks)
+        cluster_tasks.add_shard_cluster(context, cluster_id, shard_id,
+                                        replica_set_name)
 
 
 class MongoDbClusterTasks(task_models.ClusterTasks):
@@ -79,8 +90,52 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
         raise RuntimeError(
             "MongoDB replica-set members did not become ready in time")
 
+    @staticmethod
+    def _by_type(instances, instance_type):
+        return [instance for instance in instances
+                if instance.type == instance_type]
+
+    def _is_sharded(self, instances):
+        return bool(self._by_type(instances, "config_server") or
+                    self._by_type(instances, "query_router"))
+
+    def _initialize_replica_set(self, members):
+        if not members:
+            raise RuntimeError("MongoDB replica set has no members")
+        addresses = [self._address(member) for member in members]
+        guest = self.get_guest(members[0])
+        guest.initialize_replica_set(addresses)
+        self._wait_for_replica_members(guest, addresses)
+        return addresses
+
+    def _configure_query_routers(self, routers, config_servers):
+        if not routers:
+            raise RuntimeError(
+                "A sharded MongoDB cluster needs a query router")
+        config_addresses = [self._address(server)
+                            for server in config_servers]
+        if not config_addresses:
+            raise RuntimeError(
+                "A sharded MongoDB cluster needs config servers")
+        for router in routers:
+            self.get_guest(router).add_config_servers(config_addresses)
+
+    def _create_shard(self, query_router, members):
+        addresses = self._initialize_replica_set(members)
+        primary = members[0]
+        replica_set_name = self.get_guest(primary).get_replica_set_name()
+        if not replica_set_name:
+            raise RuntimeError("MongoDB shard has no replica-set name")
+        result = self.get_guest(query_router).add_shard(
+            replica_set_name, addresses[0])
+        if isinstance(result, dict) and result.get("ok") not in (None, 1):
+            raise RuntimeError(
+                "MongoDB query router rejected shard %s: %s" %
+                (replica_set_name, result))
+        return replica_set_name
+
     def create_cluster(self, context, cluster_id):
-        LOG.info("Creating MongoDB replica-set cluster %s", cluster_id)
+        LOG.info("Creating MongoDB cluster %s", cluster_id)
 
         def create():
             db_instances = DBInstance.find_all(
@@ -91,10 +146,23 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
 
             members = [Instance.load(context, instance_id)
                        for instance_id in instance_ids]
-            addresses = [self._address(member) for member in members]
-            guest = self.get_guest(members[0])
-            guest.initialize_replica_set(addresses)
-            self._wait_for_replica_members(guest, addresses)
+            if not self._is_sharded(members):
+                self._initialize_replica_set(members)
+            else:
+                config_servers = self._by_type(members, "config_server")
+                query_routers = self._by_type(members, "query_router")
+                shard_members = self._by_type(members, "member")
+                self._initialize_replica_set(config_servers)
+                self._configure_query_routers(query_routers, config_servers)
+                shard_ids = []
+                for member in shard_members:
+                    if member.shard_id not in shard_ids:
+                        shard_ids.append(member.shard_id)
+                for shard_id in shard_ids:
+                    self._create_shard(
+                        query_routers[0],
+                        [member for member in shard_members
+                         if member.shard_id == shard_id])
             for member in members:
                 self.get_guest(member).cluster_complete()
 
@@ -103,7 +171,7 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
                                BUILDING_ERROR_SERVER)
 
     def grow_cluster(self, context, cluster_id, new_instance_ids):
-        LOG.info("Growing MongoDB replica-set cluster %s", cluster_id)
+        LOG.info("Growing MongoDB cluster %s", cluster_id)
 
         def grow():
             if not self._all_instances_ready(new_instance_ids, cluster_id):
@@ -112,28 +180,61 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
                 cluster_id=cluster_id, deleted=False).all()
             existing = [instance for instance in db_instances
                         if instance.id not in new_instance_ids]
-            new_members = [Instance.load(context, instance_id)
-                           for instance_id in new_instance_ids]
+            new_instances = [Instance.load(context, instance_id)
+                             for instance_id in new_instance_ids]
             if not existing:
                 raise RuntimeError("MongoDB cluster has no existing member")
-            addresses = [self._address(member) for member in new_members]
-            guest = self.get_guest(Instance.load(context, existing[0].id))
-            guest.add_replica_members(addresses)
-            self._wait_for_replica_members(guest, addresses)
-            for member in new_members:
+            if not self._is_sharded(existing + new_instances):
+                addresses = [self._address(member)
+                             for member in new_instances]
+                guest = self.get_guest(Instance.load(
+                    context, existing[0].id))
+                guest.add_replica_members(addresses)
+                self._wait_for_replica_members(guest, addresses)
+            else:
+                config_servers = self._by_type(existing, "config_server")
+                query_routers = self._by_type(existing, "query_router")
+                new_members = self._by_type(new_instances, "member")
+                new_routers = self._by_type(new_instances, "query_router")
+                if new_routers:
+                    self._configure_query_routers(
+                        new_routers, config_servers)
+                    query_routers = query_routers + new_routers
+                if new_members:
+                    if not query_routers:
+                        raise RuntimeError(
+                            "A sharded MongoDB cluster needs a query router")
+                    shard_ids = []
+                    for member in new_members:
+                        if member.shard_id not in shard_ids:
+                            shard_ids.append(member.shard_id)
+                    for shard_id in shard_ids:
+                        self._create_shard(
+                            query_routers[0],
+                            [member for member in new_members
+                             if member.shard_id == shard_id])
+            for member in new_instances:
                 self.get_guest(member).cluster_complete()
 
         self._run_with_timeout(
             cluster_id=cluster_id, operation=grow,
             failure_status=inst_tasks.InstanceTasks.GROWING_ERROR)
 
+    def add_shard_cluster(self, context, cluster_id, shard_id,
+                          replica_set_name=None):
+        """Complete a separately scheduled shard-add operation."""
+        instance_ids = [instance.id for instance in DBInstance.find_all(
+            cluster_id=cluster_id, shard_id=shard_id,
+            deleted=False).all()]
+        self.grow_cluster(context, cluster_id, instance_ids)
+
     def restart_cluster(self, context, cluster_id):
-        """Restart members one at a time so the replica set stays available."""
+        """Restart MongoDB roles one at a time so HA stays available."""
         self.rolling_restart_cluster(
             context, cluster_id, delay_sec=5)
 
     def shrink_cluster(self, context, cluster_id, instance_ids):
-        LOG.info("Completing MongoDB replica-set shrink for %s", cluster_id)
+        LOG.info("Completing MongoDB topology shrink for %s", cluster_id)
 
         def shrink():
             db_instances = DBInstance.find_all(
@@ -151,4 +252,11 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
 
 
 class MongoDbTaskManagerAPI(task_api.API):
-    pass
+
+    def mongodb_add_shard_cluster(self, cluster_id, shard_id,
+                                  replica_set_name):
+        version = task_api.API.API_BASE_VERSION
+        cctxt = self.client.prepare(version=version)
+        cctxt.cast(self.context, "add_shard_cluster",
+                   cluster_id=cluster_id, shard_id=shard_id,
+                   replica_set_name=replica_set_name)

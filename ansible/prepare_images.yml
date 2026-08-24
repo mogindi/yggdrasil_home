@@ -53,7 +53,7 @@
               /var/lib/kolla/venv/lib/python3.10/site-packages/magnum/drivers/common/templates/kubernetes/fragments/configure-etcd.sh
               pip uninstall -y magnum-cluster-api
           - image: quay.io/openstack.kolla/trove-api:{{ image_version }}
-            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            customize_marker: customize-trove-mongodb-topology-v3.done
             custom_files:
               - src: scripts/openstack/trove-mongodb/controller/__init__.py
                 dest: /tmp/trove-mongodb-controller-init.py
@@ -65,7 +65,7 @@
               cp /tmp/trove-mongodb-controller-init.py \$trove_site/trove_yggdrasil_mongodb/__init__.py
               cp /tmp/trove-mongodb-controller-api.py \$trove_site/trove_yggdrasil_mongodb/api.py
           - image: quay.io/openstack.kolla/trove-taskmanager:{{ image_version }}
-            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            customize_marker: customize-trove-mongodb-topology-v3.done
             custom_files:
               - src: scripts/openstack/trove-mongodb/controller/__init__.py
                 dest: /tmp/trove-mongodb-controller-init.py
@@ -115,7 +115,7 @@
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-zun-wsproxy-mtls.py
           - image: quay.io/openstack.kolla/trove-api:{{ image_version }}
-            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            customize_marker: customize-trove-mongodb-topology-v3.done
             custom_files:
               - src: scripts/openstack/trove-mongodb/controller/__init__.py
                 dest: /tmp/trove-mongodb-controller-init.py
@@ -127,7 +127,7 @@
               cp /tmp/trove-mongodb-controller-init.py \$trove_site/trove_yggdrasil_mongodb/__init__.py
               cp /tmp/trove-mongodb-controller-api.py \$trove_site/trove_yggdrasil_mongodb/api.py
           - image: quay.io/openstack.kolla/trove-taskmanager:{{ image_version }}
-            customize_marker: customize-trove-mongodb-replica-set-v2.done
+            customize_marker: customize-trove-mongodb-topology-v3.done
             custom_files:
               - src: scripts/openstack/trove-mongodb/controller/__init__.py
                 dest: /tmp/trove-mongodb-controller-init.py

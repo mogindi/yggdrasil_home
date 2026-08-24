@@ -1,1 +1,1 @@
-"""Trove controller extensions for MongoDB replica-set clusters."""
+"""Trove controller extensions for MongoDB replica-set and sharded clusters."""

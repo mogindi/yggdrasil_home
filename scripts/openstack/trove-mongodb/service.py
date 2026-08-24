@@ -1,7 +1,7 @@
 """MongoDB guest-agent support for the injected Trove image.
 
 MongoDB is run in a container, while Trove keeps the configuration and
-replica-set metadata on the guest VM.  Keeping those files outside the
+topology metadata on the guest VM.  Keeping those files outside the
 container is important: a container restart must pick up a changed Trove
 configuration without recreating the data container.
 """
@@ -134,7 +134,15 @@ class MongoConfigurationManager(configuration.ConfigurationManager):
 
 
 class MongoDbApp(service.BaseDbApp):
-    """Start and supervise a MongoDB container or replica-set member."""
+    """Start and supervise a MongoDB service role.
+
+    A normal instance runs ``mongod``.  Replica-set members add the
+    appropriate replica-set options, while sharded clusters use the same
+    image for config servers, shard members, and query routers (``mongos``).
+    Query routers are initially started as a temporary standalone ``mongod``
+    because their config-server addresses are not known until Nova has
+    assigned addresses to all cluster instances.
+    """
 
     HEALTHCHECK = {
         "test": [
@@ -167,6 +175,12 @@ class MongoDbApp(service.BaseDbApp):
         except (OSError, ValueError):
             return None
 
+    def _write_cluster_config(self):
+        operating_system.write_file(
+            MONGODB_CLUSTER_FILE,
+            json.dumps(self.cluster_config, sort_keys=True, indent=2),
+            as_root=True)
+
     def configure_cluster(self, cluster_config):
         """Persist cluster metadata before the first container start."""
         if not cluster_config:
@@ -180,10 +194,18 @@ class MongoDbApp(service.BaseDbApp):
             return
 
         self.cluster_config = dict(cluster_config)
-        operating_system.write_file(
-            MONGODB_CLUSTER_FILE,
-            json.dumps(self.cluster_config, sort_keys=True, indent=2),
-            as_root=True)
+        self._write_cluster_config()
+
+    def _instance_type(self):
+        return (self.cluster_config or {}).get("instance_type", "member")
+
+    def _config_server_hosts(self):
+        return [str(host) for host in
+                (self.cluster_config or {}).get("config_servers", [])]
+
+    def _config_server_replica_set(self):
+        return (self.cluster_config or {}).get(
+            "config_server_replica_set_name", "configRS")
 
     def _configuration_contents(self, config_contents=None):
         if isinstance(config_contents, str):
@@ -244,18 +266,40 @@ class MongoDbApp(service.BaseDbApp):
 
     def _container_command(self):
         port = str(CONF.mongodb.mongodb_port)
-        command = [
-            "mongod",
-            "--config", "/etc/mongod.conf",
-            "--dbpath", MONGODB_DATA_DIR,
-            "--bind_ip_all",
-            "--port", port,
-        ]
         cluster = self.cluster_config or {}
-        replica_set_name = cluster.get("replica_set_name")
-        if replica_set_name and cluster.get("instance_type", "member") == \
-                "member":
-            command.extend(["--replSet", replica_set_name])
+        instance_type = self._instance_type()
+
+        if instance_type == "query_router" and self._config_server_hosts():
+            configdb = "%s/%s" % (
+                self._config_server_replica_set(),
+                ",".join(self._config_server_hosts()))
+            command = [
+                "mongos",
+                "--configdb", configdb,
+                "--bind_ip_all",
+                "--port", port,
+            ]
+        else:
+            # A query router without addresses is a temporary standalone
+            # mongod.  It lets Trove mark the Nova instance healthy while the
+            # task manager discovers the addresses of all cluster members.
+            command = [
+                "mongod",
+                "--config", "/etc/mongod.conf",
+                "--dbpath", MONGODB_DATA_DIR,
+                "--bind_ip_all",
+                "--port", port,
+            ]
+
+            replica_set_name = cluster.get("replica_set_name")
+            if replica_set_name and instance_type in (
+                    "member", "config_server"):
+                command.extend(["--replSet", replica_set_name])
+            if instance_type == "config_server":
+                command.append("--configsvr")
+            elif instance_type == "member" and cluster.get(
+                    "topology") == "sharded":
+                command.append("--shardsvr")
 
         key = cluster.get("key")
         if key:
@@ -266,11 +310,14 @@ class MongoDbApp(service.BaseDbApp):
         return command
 
     def _container_volumes(self, data_dir):
-        volumes = {
-            data_dir: {"bind": MONGODB_DATA_DIR, "mode": "rw"},
-            MONGODB_CONFIG_FILE: {
-                "bind": "/etc/mongod.conf", "mode": "ro"},
-        }
+        volumes = {}
+        if not (self._instance_type() == "query_router" and
+                self._config_server_hosts()):
+            volumes.update({
+                data_dir: {"bind": MONGODB_DATA_DIR, "mode": "rw"},
+                MONGODB_CONFIG_FILE: {
+                    "bind": "/etc/mongod.conf", "mode": "ro"},
+            })
         if (self.cluster_config or {}).get("key"):
             volumes[MONGODB_KEY_FILE] = {
                 "bind": "/etc/mongodb-keyfile", "mode": "ro"}
@@ -320,6 +367,18 @@ class MongoDbApp(service.BaseDbApp):
             raise exception.TroveError("MongoDB container did not become "
                                        "healthy after restart")
 
+    def _replace_container(self):
+        """Recreate the container after changing its process role."""
+        try:
+            docker_util.stop_container(self.docker_client)
+        except Exception:
+            LOG.debug("MongoDB container was already stopped", exc_info=True)
+        try:
+            docker_util.remove_container(self.docker_client)
+        except Exception:
+            LOG.debug("MongoDB container was already removed", exc_info=True)
+        self.start_db(update_db=False)
+
     def _run_mongosh(self, script):
         output = docker_util.run_command(
             self.docker_client,
@@ -353,7 +412,7 @@ class MongoDbApp(service.BaseDbApp):
         return documents
 
     def initialize_replica_set(self, members):
-        """Initialize this member and wait until it is primary."""
+        """Initialize this member's replica set and wait until primary."""
         if not self.cluster_config or not self.cluster_config.get(
                 "replica_set_name"):
             raise exception.TroveError(
@@ -362,6 +421,8 @@ class MongoDbApp(service.BaseDbApp):
             "_id": self.cluster_config["replica_set_name"],
             "members": self._member_documents(members),
         }
+        if self._instance_type() == "config_server":
+            config["configsvr"] = True
         script = (
             "const config = %s; "
             "try { rs.status(); print(JSON.stringify({already: true})); } "
@@ -370,6 +431,14 @@ class MongoDbApp(service.BaseDbApp):
         self._run_mongosh(script)
         self._wait_for_primary()
         return True
+
+    def prep_primary(self):
+        """Compatibility operation used by Trove's stock MongoDB strategy."""
+        return True
+
+    def add_members(self, members):
+        """Compatibility alias for the stock MongoDB guest API."""
+        return self.add_replica_members(members)
 
     def add_replica_members(self, members):
         """Add new members to the existing replica set."""
@@ -411,3 +480,76 @@ class MongoDbApp(service.BaseDbApp):
             "key === 'lastHeartbeat' || key === 'lastHeartbeatRecv' ? "
             "undefined : value)")
         return json.loads(output)
+
+    def get_replica_set_name(self):
+        return (self.cluster_config or {}).get("replica_set_name")
+
+    def get_key(self):
+        return (self.cluster_config or {}).get("key")
+
+    def add_config_servers(self, config_servers):
+        """Configure a query router and switch it from mongod to mongos."""
+        if self._instance_type() != "query_router":
+            raise exception.TroveError(
+                "Config-server addresses can only be applied to a query "
+                "router")
+        hosts = [str(host) for host in config_servers]
+        if not hosts:
+            raise exception.TroveError(
+                "At least one config server is required for mongos")
+        self.cluster_config["config_servers"] = hosts
+        self._write_cluster_config()
+        self._replace_container()
+        return True
+
+    def add_shard(self, replica_set_name, replica_set_member):
+        """Register a replica set with the local mongos router."""
+        if self._instance_type() != "query_router" or not \
+                self._config_server_hosts():
+            raise exception.TroveError(
+                "MongoDB shard registration requires a configured mongos")
+        connection = "%s/%s" % (replica_set_name, replica_set_member)
+        script = (
+            "const connection = %s; "
+            "const name = %s; "
+            "const existing = db.adminCommand({listShards: 1}); "
+            "const found = (existing.shards || []).some((shard) => "
+            "shard._id === name); "
+            "print(JSON.stringify(found ? {ok: 1, already: true} : "
+            "db.adminCommand({addShard: connection})));"
+        ) % (json.dumps(connection), json.dumps(replica_set_name))
+        return json.loads(self._run_mongosh(script))
+
+    def remove_shard(self, replica_set_name):
+        """Start removal of a shard through the local mongos router."""
+        if self._instance_type() != "query_router" or not \
+                self._config_server_hosts():
+            raise exception.TroveError(
+                "MongoDB shard removal requires a configured mongos")
+        script = (
+            "const name = %s; "
+            "const result = db.adminCommand({listShards: 1}); "
+            "const found = (result.shards || []).some((shard) => "
+            "shard._id === name); "
+            "print(JSON.stringify(found ? "
+            "db.adminCommand({removeShard: name}) : "
+            "{ok: 1, state: 'completed', already: true}));"
+        ) % json.dumps(str(replica_set_name))
+        return json.loads(self._run_mongosh(script))
+
+    def is_shard_active(self, replica_set_name):
+        """Return whether a replica set is still registered as a shard."""
+        if self._instance_type() != "query_router" or not \
+                self._config_server_hosts():
+            raise exception.TroveError(
+                "MongoDB shard status requires a configured mongos")
+        script = (
+            "const result = db.adminCommand({listShards: 1}); "
+            "print(JSON.stringify((result.shards || []).some((shard) => "
+            "shard._id === %s)));"
+        ) % json.dumps(str(replica_set_name))
+        return json.loads(self._run_mongosh(script))
+
+    def cluster_complete(self):
+        """Keep the stock guest-agent cluster-complete RPC harmless."""
+        return True

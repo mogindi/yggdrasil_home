@@ -333,15 +333,21 @@ Below is a complete catalog of Make targets in this repo.
   to create that image. Set `TROVE_MONGODB_VERSION` to override the default MongoDB
   version (`8.0`). The injected adapter is experimental and supports standalone
   lifecycle/configuration operations plus unauthenticated MongoDB replica-set
-  clusters with two or more members. Cluster configuration changes are applied
-  with a rolling restart when Trove marks them restart-required; clusters can be
-  grown and shrunk while retaining at least two members. Database/user
-  administration, backups, and restore snapshots are not included, and
-  authentication is disabled, so use it only in an isolated test environment.
+  clusters with two or more members. Pass `topology=sharded` in
+  `--extended-properties` to create a sharded cluster with config servers, one
+  shard replica set, and one or more `mongos` routers; use `num_configsvr` and
+  `num_mongos` to size those roles. Sharded clusters can add complete shards or
+  routers with `cluster grow`, and remove complete shards or routers with
+  `cluster shrink`; config-server membership remains fixed for the life of the
+  cluster. Cluster configuration changes are applied with a rolling restart
+  when Trove marks them restart-required. Database/user administration,
+  backups, and restore snapshots are not included, and authentication is
+  disabled, so use it only in an isolated test environment.
 - `openstack-trove-mongodb-test` — creates a MongoDB Trove instance, waits for
   `ACTIVE/HEALTHY`, checks port 27017, restarts it, then creates a two-member
   replica set, updates its configuration, grows it to three members, shrinks it
-  back to two, and cleans up. It uses `m1.small` by default; override the flavor with
+  back to two, creates and grows a sharded cluster, and removes its extra shard.
+  It uses `m1.small` by default; override the flavor with
   `TROVE_MONGODB_TEST_FLAVOR` when the deployment has different capacity.
 - `openstack-remove-test-resources` — removes test resources.
 

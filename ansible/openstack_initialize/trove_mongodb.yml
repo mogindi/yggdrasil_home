@@ -276,6 +276,66 @@
             "${cluster_instance_ids[0]}"
         wait_for_cluster 2
 
+        # Keep the configuration group for the sharded-cluster exercise, but
+        # remove the replica-set cluster before allocating the larger topology.
+        old_cluster_name="$cluster_name"
+        delete_cluster
+        for delete_attempt in $(seq 1 60); do
+          if ! timeout 45 openstack database cluster show \
+              "$old_cluster_name" >/dev/null 2>&1; then
+            break
+          fi
+          sleep 5
+        done
+        if timeout 45 openstack database cluster show \
+            "$old_cluster_name" >/dev/null 2>&1; then
+          echo "Timed out waiting for the replica-set test cluster deletion" >&2
+          exit 1
+        fi
+        cluster_name="test-mongodb-sharded-$suffix"
+        sharded_instance="flavor=$mongodb_flavor,volume=5,nic=net-id=$network_id"
+        timeout 120 openstack database cluster create "$cluster_name" \
+            mongodb "$mongodb_version" \
+            --instance "$sharded_instance" \
+            --instance "$sharded_instance" \
+            --extended-properties topology=sharded,num_configsvr=2,num_mongos=1 \
+            --configuration "$config_id"
+
+        # The public cluster view exposes shard members and routers; config
+        # servers remain management-only.  That is 3 visible nodes initially.
+        wait_for_cluster 3
+
+        shard_member_a="${cluster_name}-new-shard-a"
+        shard_member_b="${cluster_name}-new-shard-b"
+        timeout 120 openstack database cluster grow "$cluster_name" \
+            --instance "${sharded_instance},type=replica,name=$shard_member_a" \
+            --instance "${sharded_instance},type=replica,name=$shard_member_b,related_to=$shard_member_a"
+        wait_for_cluster 5
+
+        timeout 120 openstack database cluster grow "$cluster_name" \
+            --instance "${sharded_instance},type=query_router"
+        wait_for_cluster 6
+
+        sharded_instances=$(timeout 45 openstack database cluster show \
+            "$cluster_name" -f json)
+        shard_ids=($(python3 -c 'import json,sys; data=json.load(sys.stdin)["cluster"]["instances"]; print("\n".join(sorted({item["shard_id"] for item in data if item.get("type") == "member" and item.get("shard_id")})))' <<< "$sharded_instances"))
+        shard_count=$(printf '%s\n' "${shard_ids[@]}" | awk 'NF {count++} END {print count+0}')
+        if [[ $shard_count -ne 2 ]]; then
+          printf '%s\n' "$sharded_instances"
+          echo "Expected two MongoDB shards" >&2
+          exit 1
+        fi
+        second_shard_members=($(python3 -c 'import json,sys; data=json.load(sys.stdin)["cluster"]["instances"]; shard=sys.argv[1]; print("\n".join(item["id"] for item in data if item.get("type") == "member" and item.get("shard_id") == shard))' "${shard_ids[1]}" <<< "$sharded_instances"))
+        second_shard_member_count=$(printf '%s\n' "${second_shard_members[@]}" | awk 'NF {count++} END {print count+0}')
+        if [[ $second_shard_member_count -ne 2 ]]; then
+          printf '%s\n' "$sharded_instances"
+          echo "Expected the added MongoDB shard to have two members" >&2
+          exit 1
+        fi
+        timeout 120 openstack database cluster shrink "$cluster_name" \
+            "${second_shard_members[@]}"
+        wait_for_cluster 4
+
         cleanup_cluster
         trap - EXIT
       args:
