@@ -53,12 +53,28 @@
         mode: '0644'
       tags: configure
 
+    - name: Stage Nova reader policy for configure script
+      copy:
+        src: "{{ playbook_dir }}/../scripts/kolla-ansible/policies/nova/policy.yaml"
+        dest: /tmp/yggdrasil-nova-reader-policy.yaml
+        mode: '0644'
+      tags: configure
+
+    - name: Stage Cinder reader policy for configure script
+      copy:
+        src: "{{ playbook_dir }}/../scripts/kolla-ansible/policies/cinder/policy.yaml"
+        dest: /tmp/yggdrasil-cinder-reader-policy.yaml
+        mode: '0644'
+      tags: configure
+
     - name: Configure kolla-ansible
       script: "{{ playbook_dir }}/../scripts/kolla-ansible/configure.sh"
       args:
         chdir: "{{ playbook_dir }}/.."
       environment:
         CLOUDKITTY_METRICS_FILE: /tmp/yggdrasil-cloudkitty-metrics.yml
+        OPENSTACK_NOVA_POLICY_FILE: /tmp/yggdrasil-nova-reader-policy.yaml
+        OPENSTACK_CINDER_POLICY_FILE: /tmp/yggdrasil-cinder-reader-policy.yaml
         OPENSTACK_NETWORK_INTERFACE: "{{ openstack_network_interface }}"
         OPENSTACK_NEUTRON_EXTERNAL_INTERFACE: "{{ openstack_neutron_external_interface }}"
         OPENSTACK_KOLLA_INTERNAL_VIP_ADDRESS: "{{ openstack_kolla_internal_vip_address }}"

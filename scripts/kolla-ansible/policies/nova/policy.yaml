@@ -1,0 +1,4 @@
+# Keypairs are project resources, but creating or deleting one is a mutation.
+# Keep project-scoped reader users limited to list/show operations.
+"os_compute_api:os-keypairs:create": "rule:project_member_or_admin"
+"os_compute_api:os-keypairs:delete": "rule:project_member_or_admin"

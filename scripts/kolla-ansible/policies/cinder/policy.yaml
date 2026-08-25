@@ -1,0 +1,4 @@
+# A project-scoped reader may inspect volumes, but must not create them.
+# Include the from-image path because it also creates a volume.
+"volume:create": "rule:xena_system_admin_or_project_member"
+"volume:create_from_image": "rule:xena_system_admin_or_project_member"

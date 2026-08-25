@@ -285,6 +285,18 @@ rbd_connect_timeout = 5
 cpu_mode = host-passthrough
 EOF
 
+# Keep project-scoped reader users from mutating Nova keypairs. Kolla copies
+# this policy file into the Nova API and metadata service containers.
+NOVA_POLICY_SOURCE="${OPENSTACK_NOVA_POLICY_FILE:-$SCRIPT_DIR/policies/nova/policy.yaml}"
+cp "$NOVA_POLICY_SOURCE" "$config_dir/policy.yaml"
+
+# Keep project-scoped reader users from creating Cinder volumes. OpenStack
+# policies are enforced per service, so Cinder needs its own override.
+config_dir=etc/kolla/config/cinder
+mkdir -p "$config_dir"
+CINDER_POLICY_SOURCE="${OPENSTACK_CINDER_POLICY_FILE:-$SCRIPT_DIR/policies/cinder/policy.yaml}"
+cp "$CINDER_POLICY_SOURCE" "$config_dir/policy.yaml"
+
 # skyline
 mkdir -p etc/kolla/config/skyline/
 cat >  etc/kolla/config/skyline/skyline.yaml <<EOF
