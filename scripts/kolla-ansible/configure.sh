@@ -360,7 +360,7 @@ if is_enabled "$OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED"; then
     extra_args:
       aggregation_method: mean
       resource_type: yggdrasil_function
-      force_granularity: 300
+      force_granularity: 600
 
   function.memory.usage:
     unit: GiB
@@ -373,6 +373,6 @@ if is_enabled "$OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED"; then
     extra_args:
       aggregation_method: mean
       resource_type: yggdrasil_function
-      force_granularity: 300
+      force_granularity: 600
 EOF
 fi

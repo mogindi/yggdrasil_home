@@ -14,7 +14,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: instance
-      force_granularity: 300
+      force_granularity: 600
 
   image.size:
     unit: MiB
@@ -29,7 +29,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: image
-      force_granularity: 300
+      force_granularity: 600
 
   volume.size:
     unit: GiB
@@ -42,7 +42,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: volume
-      force_granularity: 300
+      force_granularity: 600
 
   network.outgoing.bytes.rate:
     unit: MB
@@ -56,6 +56,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: instance_network_interface
+      force_granularity: 600
 
   network.incoming.bytes.rate:
     unit: MB
@@ -69,6 +70,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: instance_network_interface
+      force_granularity: 600
 
   ip.floating:
     unit: ip
@@ -82,6 +84,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: network
+      force_granularity: 600
 
   radosgw.objects.size:
     unit: GiB
@@ -93,3 +96,4 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: ceph_account
+      force_granularity: 600
