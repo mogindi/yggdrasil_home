@@ -1,8 +1,11 @@
 """MongoDB guest-agent manager injected into the Trove guest image."""
 
+from oslo_service import periodic_task
+
 from trove.guestagent.datastore import manager
 from trove.guestagent.datastore import service as base_service
 from trove.guestagent.datastore.experimental.mongodb import service
+from trove.instance import service_status
 
 
 class Manager(manager.Manager):
@@ -12,6 +15,30 @@ class Manager(manager.Manager):
         super(Manager, self).__init__("mongodb")
         self.status = base_service.BaseDbStatus(self.docker_client)
         self.app = service.MongoDbApp(self.status, self.docker_client)
+
+    @periodic_task.periodic_task(spacing=30)
+    def update_status(self, context):
+        """Keep a clustered guest alive while Trove assembles its topology.
+
+        Trove marks clustered guests ``INSTANCE_READY`` after the local
+        database container is healthy, but intentionally delays the normal
+        prepare marker until the task manager has configured the complete
+        topology.  BaseDbStatus therefore suppresses periodic heartbeats in
+        that interval.  A sharded build on small guests can legitimately
+        take longer than Trove's 90-second heartbeat expiry, so renew the
+        existing transitional status without advertising the database as
+        fully installed before ``cluster_complete`` runs.
+        """
+        if not self.status.is_installed:
+            if (self.app.cluster_config and
+                    self.status.status ==
+                    service_status.ServiceStatuses.INSTANCE_READY):
+                self.status.set_status(
+                    service_status.ServiceStatuses.INSTANCE_READY,
+                    force=True)
+            return
+
+        super(Manager, self).update_status(context)
 
     @property
     def configuration_manager(self):
@@ -26,7 +53,7 @@ class Manager(manager.Manager):
             raise RuntimeError(
                 "The injected MongoDB adapter does not yet support packages, "
                 "database/user provisioning, backups, or restore snapshots.")
-        self.app.prepare_configuration(config_contents)
+        self.app.prepare_configuration(config_contents, memory_mb=memory_mb)
         self.app.configure_cluster(cluster_config)
         self.app.update_overrides(overrides)
         self.app.start_db(ds_version=ds_version)

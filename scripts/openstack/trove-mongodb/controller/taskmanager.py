@@ -54,7 +54,15 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
     def _run_with_timeout(self, operation, cluster_id, failure_status=None):
         timeout = Timeout(CONF.cluster_usage_timeout)
         try:
-            operation()
+            completed = operation()
+            # The stock readiness poll returns False after it has marked the
+            # affected instances failed.  Do not clear the cluster task in
+            # that case: doing so makes a failed build look successful while
+            # the instances are still in ERROR.
+            if completed is False:
+                self.update_statuses_on_failure(
+                    cluster_id, status=failure_status)
+                return
             self.reset_task()
         except Timeout as exc:
             if exc is not timeout:
@@ -142,7 +150,7 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
                 cluster_id=cluster_id, deleted=False).all()
             instance_ids = [instance.id for instance in db_instances]
             if not self._all_instances_ready(instance_ids, cluster_id):
-                return
+                return False
 
             members = [Instance.load(context, instance_id)
                        for instance_id in instance_ids]
@@ -175,10 +183,15 @@ class MongoDbClusterTasks(task_models.ClusterTasks):
 
         def grow():
             if not self._all_instances_ready(new_instance_ids, cluster_id):
-                return
+                return False
             db_instances = DBInstance.find_all(
                 cluster_id=cluster_id, deleted=False).all()
-            existing = [instance for instance in db_instances
+            # DBInstance.find_all() returns database records without the
+            # request context that ClusterTasks.get_guest() needs.  Reload
+            # existing members through Instance.load(), as create_cluster()
+            # does, before using them for sharded router/config operations.
+            existing = [Instance.load(context, instance.id)
+                        for instance in db_instances
                         if instance.id not in new_instance_ids]
             new_instances = [Instance.load(context, instance_id)
                              for instance_id in new_instance_ids]

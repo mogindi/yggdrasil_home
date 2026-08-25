@@ -16,9 +16,13 @@ from trove.cluster.models import Cluster
 from trove.cluster.tasks import ClusterTasks
 from trove.cluster.views import ClusterView
 from trove.common import cfg
+from trove.common import clients
 from trove.common import exception
+from trove.common import glance as common_glance
 from trove.common import server_group as srv_grp
 from trove.common import utils
+from trove.common.notification import DBaaSClusterGrow
+from trove.common.notification import StartNotification
 from trove.common.strategies.cluster import base
 from trove.configuration import models as config_models
 from trove.extensions.mgmt.clusters.views import MgmtClusterView
@@ -130,7 +134,7 @@ class MongoDbCluster(models.Cluster):
     @classmethod
     def _create_sharded(cls, context, name, datastore, datastore_version,
                         instances, extended_properties, locality,
-                        configuration):
+                        configuration, image_id=None):
         mongo_conf = CONF.get(datastore_version.manager)
         if mongo_conf.cluster_secure:
             raise exception.TroveError(
@@ -176,6 +180,8 @@ class MongoDbCluster(models.Cluster):
             config_models.Configuration.find(
                 context, configuration_id, datastore_version.id)
 
+        resolved_image_id = image_id or datastore_version.image_id
+
         db_info = models.DBCluster.create(
             name=name,
             tenant_id=context.project_id,
@@ -196,7 +202,7 @@ class MongoDbCluster(models.Cluster):
                 "name", "%s-rs1-%d" % (name, index))
             inst_models.Instance.create(
                 context, instance_name, instance["flavor_id"],
-                datastore_version.image_id, [], [], datastore,
+                resolved_image_id, [], [], datastore,
                 datastore_version, shard_volume_size, None,
                 availability_zone=instance.get("availability_zone"),
                 nics=instance.get("nics", nics),
@@ -211,7 +217,7 @@ class MongoDbCluster(models.Cluster):
         for index in range(1, num_config_servers + 1):
             inst_models.Instance.create(
                 context, "%s-configsvr-%d" % (name, index), flavor_id,
-                datastore_version.image_id, [], [], datastore,
+                resolved_image_id, [], [], datastore,
                 datastore_version, config_volume_size, None,
                 availability_zone=None, nics=nics,
                 configuration_id=configuration_id,
@@ -223,7 +229,7 @@ class MongoDbCluster(models.Cluster):
         for index in range(1, num_query_routers + 1):
             inst_models.Instance.create(
                 context, "%s-mongos-%d" % (name, index), flavor_id,
-                datastore_version.image_id, [], [], datastore,
+                resolved_image_id, [], [], datastore,
                 datastore_version, router_volume_size, None,
                 availability_zone=None, nics=nics,
                 configuration_id=configuration_id,
@@ -239,7 +245,7 @@ class MongoDbCluster(models.Cluster):
     @staticmethod
     def _create_instances(context, db_info, datastore, datastore_version,
                           instances, locality, configuration_id=None,
-                          enforce_minimum=True):
+                          enforce_minimum=True, image_id=None):
         mongo_conf = CONF.get(datastore_version.manager)
         if mongo_conf.cluster_secure:
             raise exception.TroveError(
@@ -264,6 +270,7 @@ class MongoDbCluster(models.Cluster):
             {"instances": len(instances), "volumes": total_volume_size})
 
         member_instances = []
+        resolved_image_id = image_id or datastore_version.image_id
         for index, instance in enumerate(instances, start=1):
             name = instance.get("name") or "%s-member-%s" % (
                 db_info.name, index)
@@ -272,7 +279,7 @@ class MongoDbCluster(models.Cluster):
                     context,
                     name,
                     instance["flavor_id"],
-                    datastore_version.image_id,
+                    resolved_image_id,
                     [],
                     [],
                     datastore,
@@ -304,7 +311,7 @@ class MongoDbCluster(models.Cluster):
             LOG.info("Creating MongoDB sharded cluster %s", name)
             return cls._create_sharded(
                 context, name, datastore, datastore_version, instances,
-                extended_properties, locality, configuration)
+                extended_properties, locality, configuration, image_id)
 
         LOG.info("Creating MongoDB replica-set cluster %s", name)
 
@@ -322,7 +329,7 @@ class MongoDbCluster(models.Cluster):
 
         cls._create_instances(
             context, db_info, datastore, datastore_version, instances,
-            locality, configuration_id=configuration_id)
+            locality, configuration_id=configuration_id, image_id=image_id)
         task_api.load(context, datastore_version.manager).create_cluster(
             db_info.id)
 
@@ -341,6 +348,53 @@ class MongoDbCluster(models.Cluster):
                 raise exception.ClusterFlavorsNotEqual()
             if instance.get("volume_size") != reference.volume_size:
                 raise exception.ClusterVolumeSizesNotEqual()
+
+    def action(self, context, req, action, param):
+        """Preserve MongoDB-specific grow fields before dispatching.
+
+        The base cluster action parser drops ``related_to``.  That field is
+        required to group named grow members into one new MongoDB shard, so
+        retain it here while keeping all other cluster actions on Trove's
+        standard implementation.
+        """
+        if action != "grow":
+            return super(MongoDbCluster, self).action(
+                context, req, action, param)
+
+        context.notification = DBaaSClusterGrow(context, request=req)
+        with StartNotification(context, cluster_id=self.id):
+            instances = []
+            for node in param:
+                instance = {
+                    "flavor_id": utils.get_id_from_href(node["flavorRef"])
+                }
+                if "name" in node:
+                    instance["name"] = node["name"]
+                if "volume" in node:
+                    instance["volume_size"] = int(node["volume"]["size"])
+                if "modules" in node:
+                    instance["modules"] = node["modules"]
+                if "nics" in node:
+                    instance["nics"] = node["nics"]
+                if "availability_zone" in node:
+                    instance["availability_zone"] = node[
+                        "availability_zone"]
+                if "type" in node:
+                    instance_type = node["type"]
+                    if isinstance(instance_type, str):
+                        instance_type = instance_type.split(",")
+                    instance["instance_type"] = instance_type
+                if "related_to" in node:
+                    instance["related_to"] = node["related_to"]
+                instances.append(instance)
+
+            image_id = self.ds_version.image_id
+            if not image_id:
+                glance_client = clients.create_glance_client(context)
+                image_id = common_glance.get_image_id(
+                    glance_client, self.ds_version.image_id,
+                    self.ds_version.image_tags)
+            return self.grow(instances, image_id)
 
     @staticmethod
     def _group_shard_instances(instances):
@@ -395,7 +449,7 @@ class MongoDbCluster(models.Cluster):
             return value[0]
         return value
 
-    def _create_sharded_instances(self, instances, locality):
+    def _create_sharded_instances(self, instances, locality, image_id=None):
         mongo_conf = CONF.get(self.ds_version.manager)
         replica_items = [instance for instance in instances
                          if self._instance_type(instance) in
@@ -433,6 +487,7 @@ class MongoDbCluster(models.Cluster):
             if member.type == "member" and member.shard_id}
         next_shard_number = len(existing_shards) + 1
         new_ids = []
+        resolved_image_id = image_id or self.ds_version.image_id
         for group in groups:
             shard_id = utils.generate_uuid()
             replica_set_name = "rs%d" % next_shard_number
@@ -445,7 +500,7 @@ class MongoDbCluster(models.Cluster):
                     (self.name, replica_set_name, index))
                 created = inst_models.Instance.create(
                     self.context, name, item["flavor_id"],
-                    self.ds_version.image_id, [], [], self.ds,
+                    resolved_image_id, [], [], self.ds,
                     self.ds_version, item.get("volume_size"), None,
                     availability_zone=item.get("availability_zone"),
                     nics=item.get("nics"),
@@ -462,7 +517,7 @@ class MongoDbCluster(models.Cluster):
             name = item.get("name", "%s-mongos-%d" % (self.name, index))
             created = inst_models.Instance.create(
                 self.context, name, item["flavor_id"],
-                self.ds_version.image_id, [], [], self.ds,
+                resolved_image_id, [], [], self.ds,
                 self.ds_version, item.get("volume_size"), None,
                 availability_zone=item.get("availability_zone"),
                 nics=item.get("nics"),
@@ -475,12 +530,13 @@ class MongoDbCluster(models.Cluster):
             new_ids.append(created.id)
         return new_ids
 
-    def _grow_sharded(self, instances):
+    def _grow_sharded(self, instances, image_id=None):
         LOG.info("Growing MongoDB sharded cluster %s", self.id)
         self.validate_cluster_available()
         locality = srv_grp.ServerGroup.convert_to_hint(self.server_group)
         try:
-            new_ids = self._create_sharded_instances(instances, locality)
+            new_ids = self._create_sharded_instances(
+                instances, locality, image_id=image_id)
         except Exception:
             self.update_db(task_status=ClusterTasks.NONE)
             raise
@@ -492,7 +548,7 @@ class MongoDbCluster(models.Cluster):
 
     def grow(self, instances, image_id=None):
         if self.is_sharded:
-            return self._grow_sharded(instances)
+            return self._grow_sharded(instances, image_id=image_id)
 
         LOG.info("Growing MongoDB replica-set cluster %s", self.id)
         self.validate_cluster_available()
@@ -508,7 +564,8 @@ class MongoDbCluster(models.Cluster):
             instances,
             locality,
             configuration_id=self.configuration_id,
-            enforce_minimum=False)
+            enforce_minimum=False,
+            image_id=image_id)
         task_api.load(self.context, self.ds_version.manager).grow_cluster(
             self.id, [instance.id for instance in new_instances])
         return self.__class__(self.context, self.db_info,

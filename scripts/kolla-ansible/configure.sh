@@ -185,6 +185,10 @@ mkdir -p etc/kolla/config/trove/
 cat > etc/kolla/config/trove/trove-taskmanager.conf <<EOF
 [DEFAULT]
 nova_keypair = testkey
+# Inject the guest-agent configuration through Nova's config drive.  This is
+# reliable for clustered guests even when the Neutron metadata service is
+# temporarily unavailable during a parallel Nova boot.
+use_nova_server_config_drive = true
 
 #[oslo_messaging_rabbit]
 #rabbit_quorum_queue = true

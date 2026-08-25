@@ -105,11 +105,16 @@ create_openstack_linux_image() {
 	mount_args=$6
 	injection_source_dir=$7
 	injection_target_dir=$8
+	force_rebuild=$9
 
 
 	image_format=qcow2
+	existing_image_id=""
+	if openstack image show "$image_name" >/dev/null 2>&1; then
+		existing_image_id=$(openstack image show "$image_name" -f value -c id)
+	fi
 
-	if ! openstack image show "$image_name" >/dev/null 2>&1; then
+	if [[ -z "$existing_image_id" || -n "$force_rebuild" ]]; then
 		echo ================= $image_name =================
 		
 		rm -f $image_name*
@@ -124,9 +129,30 @@ create_openstack_linux_image() {
 		if [[ -n $injection_source_dir ]]; then
 			copy_files_to_qcow2_image "$image_name.$image_format" \
 				"$injection_source_dir" "$injection_target_dir" "$mount_args"
-		fi
+			fi
 		qemu-img convert $image_name.$image_format $image_name.raw
-		openstack image create $image_name --file $image_name.raw $extra_args
+		if [[ -n "$existing_image_id" ]]; then
+			# Glance does not allow replacing the data of an active image in
+			# place.  Upload a complete replacement first, then remove the old
+			# image so consumers never observe a missing image.
+			new_image_id=$(openstack image create "$image_name" \
+				--file "$image_name.raw" \
+				--progress \
+				$extra_args \
+				-f value -c id)
+			if [[ -z "$new_image_id" ]]; then
+				rm -f $image_name*
+				return 1
+			fi
+			if ! openstack image delete "$existing_image_id"; then
+				echo "Unable to replace existing image $existing_image_id; deleting replacement $new_image_id" >&2
+				openstack image delete "$new_image_id" || true
+				rm -f $image_name*
+				return 1
+			fi
+		else
+			openstack image create $image_name --file $image_name.raw $extra_args
+		fi
 		rm -f $image_name*
 	fi 2>&1  # | tail -n 99999  # adding this to output all at once
 }

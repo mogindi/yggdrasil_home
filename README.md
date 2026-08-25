@@ -330,8 +330,12 @@ Below is a complete catalog of Make targets in this repo.
 - `openstack-manila` — initializes Manila resources.
 - `openstack-trove` — initializes Trove resources and registers MongoDB when its
   adapted guest image is available. Run `make openstack-trove-mongodb-image` first
-  to create that image. Set `TROVE_MONGODB_VERSION` to override the default MongoDB
-  version (`8.0`). The injected adapter is experimental and supports standalone
+  to create that image; set `TROVE_MONGODB_REBUILD=1` when refreshing the existing
+  image after changing the injected guest adapter. This uploads a replacement
+  image and removes the previous image because Glance cannot replace active image
+  data in place. Set
+  `TROVE_MONGODB_VERSION` to override the default MongoDB version (`8.0`). The
+  injected adapter is experimental and supports standalone
   lifecycle/configuration operations plus unauthenticated MongoDB replica-set
   clusters with two or more members. Pass `topology=sharded` in
   `--extended-properties` to create a sharded cluster with config servers, one
@@ -350,7 +354,8 @@ Below is a complete catalog of Make targets in this repo.
   creation, rolling updates, scaling, reachability, router removal, complete
   shard removal, and invalid partial-removal guards. It uses `m1.small` by
   default; override the flavor with `TROVE_MONGODB_TEST_FLAVOR` when the
-  deployment has different capacity.
+  deployment has different capacity. Use `TROVE_MONGODB_TEST_SCOPE=replica`
+  or `sharding` for focused runs; the default scope is `all`.
 - `openstack-remove-test-resources` — removes test resources.
 
 ### Bundles / orchestrated targets

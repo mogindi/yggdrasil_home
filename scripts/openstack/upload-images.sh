@@ -53,6 +53,7 @@ upload_trove_mongodb_image() {
   local mongodb_version="${TROVE_MONGODB_VERSION:-8.0}"
   local mongodb_image_ref="$mongodb_image"
   local payload_dir="$SCRIPT_DIR/trove-mongodb"
+  local force_rebuild="${TROVE_MONGODB_REBUILD:-}"
   local commands
 
   if [[ ! "$image_name" =~ ^[A-Za-z0-9._-]+$ ]] || \
@@ -67,7 +68,11 @@ upload_trove_mongodb_image() {
     mongodb_image_ref="$mongodb_image:$mongodb_version"
   fi
 
-  commands="mkdir -p /etc/trove && printf '%s\\n' '$mongodb_image_ref' > /etc/trove/mongodb-image && chmod 0644 /etc/trove/mongodb-image"
+  # Clustered MongoDB containers use the VM's host network so the addresses
+  # advertised to the replica set are the same addresses mongod binds to.
+  # The Trove base image ships a persistent host firewall that rejects all
+  # other inbound ports, so allow MongoDB before that final reject rule.
+  commands="mkdir -p /etc/trove && printf '%s\\n' '$mongodb_image_ref' > /etc/trove/mongodb-image && chmod 0644 /etc/trove/mongodb-image && if [[ -f /etc/iptables/rules.v4 ]] && grep -q '^-A openstack-INPUT -j REJECT' /etc/iptables/rules.v4; then sed -i '/^-A openstack-INPUT -j REJECT/i -A openstack-INPUT -p tcp -m tcp --dport 27017 -j ACCEPT' /etc/iptables/rules.v4; fi"
 
   create_openstack_linux_image "$image_url" \
     "$image_name" \
@@ -76,7 +81,8 @@ upload_trove_mongodb_image() {
     "" \
     "" \
     "$payload_dir" \
-    "/opt/guest-agent-venv/lib/python3.12/site-packages/trove/guestagent/datastore/experimental/mongodb"
+    "/opt/guest-agent-venv/lib/python3.12/site-packages/trove/guestagent/datastore/experimental/mongodb" \
+    "$force_rebuild"
 }
 
 case "${1:-}" in

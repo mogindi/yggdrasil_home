@@ -119,8 +119,13 @@ class MongoConfigurationManager(configuration.ConfigurationManager):
         if isinstance(options, str):
             options = self._codec.deserialize(options) or {}
         options = self.normalize(options)
-        super(MongoConfigurationManager, self).reset_configuration(
-            options, remove_overrides=remove_overrides)
+        # ConfigurationManager.reset_configuration dispatches back to
+        # ``self.reset_configuration`` when passed a dict.  Serialize first
+        # so the base implementation takes its file-writing path instead of
+        # recursing through this override.
+        configuration.ConfigurationManager.reset_configuration(
+            self, self._codec.serialize(options),
+            remove_overrides=remove_overrides)
 
     def apply_user_override(self, options, change_id="common"):
         super(MongoConfigurationManager, self).apply_user_override(
@@ -151,10 +156,15 @@ class MongoDbApp(service.BaseDbApp):
             "--port 27017 "
             "--eval 'db.adminCommand({ ping: 1 }).ok'",
         ],
-        "start_period": 10 * 1000000000,
-        "interval": 10 * 1000000000,
-        "timeout": 5 * 1000000000,
-        "retries": 3,
+        # mongosh starts a Node.js process for every probe.  On the small
+        # Trove flavors that can briefly exceed five seconds while the guest
+        # agent, mongod, and the VM are contending for memory.  A transient
+        # slow probe must not turn a healthy database into CRASHED while a
+        # cluster operation is still converging.
+        "start_period": 30 * 1000000000,
+        "interval": 15 * 1000000000,
+        "timeout": 15 * 1000000000,
+        "retries": 6,
     }
 
     def __init__(self, status, docker_client):
@@ -207,19 +217,37 @@ class MongoDbApp(service.BaseDbApp):
         return (self.cluster_config or {}).get(
             "config_server_replica_set_name", "configRS")
 
-    def _configuration_contents(self, config_contents=None):
+    def _configuration_contents(self, config_contents=None, memory_mb=None):
         if isinstance(config_contents, str):
             config_contents = (self.configuration_manager.CODEC.deserialize(
                 config_contents) or {})
         config = {
             "storage": {"dbPath": MONGODB_DATA_DIR},
         }
+        if memory_mb:
+            try:
+                memory_mb = int(memory_mb)
+            except (TypeError, ValueError):
+                memory_mb = 0
+        if memory_mb > 0:
+            # Leave most of a small guest for Ubuntu, Trove, Docker, and
+            # mongosh.  An explicit user configuration still wins during the
+            # merge below.  This keeps MongoDB from exhausting 512/768 MiB
+            # guests before the guest agent can finish topology work.
+            # MongoDB requires at least 0.256 GB for this setting.  Keep
+            # that floor even on the smallest test flavor; values below it
+            # make mongod reject the configuration before its health check
+            # can ever pass.
+            cache_size_gb = min(max(memory_mb * 0.25 / 1024, 0.256), 2.0)
+            config["storage"]["wiredTiger"] = {
+                "engineConfig": {"cacheSizeGB": cache_size_gb},
+            }
         return MongoConfigurationManager._merge(
             config, MongoConfigurationManager.normalize(config_contents))
 
-    def prepare_configuration(self, config_contents=None):
+    def prepare_configuration(self, config_contents=None, memory_mb=None):
         self.configuration_manager.reset_configuration(
-            self._configuration_contents(config_contents))
+            self._configuration_contents(config_contents, memory_mb=memory_mb))
 
     def update_overrides(self, overrides):
         if overrides:
@@ -257,8 +285,14 @@ class MongoDbApp(service.BaseDbApp):
         return cfg.get_configuration_property("mount_point") \
             or "/var/lib/mongodb"
 
-    @staticmethod
-    def _network_mode():
+    def _network_mode(self):
+        # Cluster members advertise their VM addresses to MongoDB.  Bridge
+        # networking gives mongod a container-only identity, so MongoDB can
+        # reject rs.initiate() with "No host described ... maps to this
+        # node".  Use the guest's host network for every clustered role so
+        # the advertised Trove address is also the address MongoDB sees.
+        if self.cluster_config:
+            return "host"
         if CONF.network_isolation and \
                 os.path.exists(constants.ETH1_CONFIG_PATH):
             return constants.DOCKER_HOST_NIC_MODE
@@ -329,6 +363,7 @@ class MongoDbApp(service.BaseDbApp):
         operating_system.ensure_directory(data_dir, force=True, as_root=True)
 
         image = self._image()
+        network_mode = self._network_mode()
         LOG.info("Starting MongoDB container from image %s", image)
 
         try:
@@ -336,9 +371,10 @@ class MongoDbApp(service.BaseDbApp):
                 self.docker_client,
                 image,
                 name="database",
-                network_mode=self._network_mode(),
-                ports={"%s/tcp" % CONF.mongodb.mongodb_port:
-                       CONF.mongodb.mongodb_port},
+                network_mode=network_mode,
+                ports={} if network_mode == "host" else {
+                    "%s/tcp" % CONF.mongodb.mongodb_port:
+                    CONF.mongodb.mongodb_port},
                 volumes=self._container_volumes(data_dir),
                 command=self._container_command(),
                 healthcheck=self.HEALTHCHECK,
@@ -379,14 +415,33 @@ class MongoDbApp(service.BaseDbApp):
             LOG.debug("MongoDB container was already removed", exc_info=True)
         self.start_db(update_db=False)
 
-    def _run_mongosh(self, script):
+    def _run_mongosh(self, script, host="127.0.0.1"):
         output = docker_util.run_command(
             self.docker_client,
-            ["mongosh", "--quiet", "--host", "127.0.0.1", "--port",
+            ["mongosh", "--quiet", "--host", host, "--port",
              str(CONF.mongodb.mongodb_port), "--eval", script])
         if isinstance(output, bytes):
             output = output.decode("utf-8", errors="replace")
         return output.strip()
+
+    @staticmethod
+    def _mongosh_host(host):
+        """Return a host value suitable for mongosh's ``--host`` option."""
+        host = str(host or "")
+        if host.startswith("[") and "]" in host:
+            return host[1:host.index("]")]
+        if host.count(":") == 1:
+            return host.rsplit(":", 1)[0]
+        return host
+
+    def _replica_hello(self):
+        output = self._run_mongosh("JSON.stringify(db.hello())")
+        try:
+            return json.loads(output)
+        except ValueError as exc:
+            raise exception.TroveError(
+                "MongoDB did not return replica-set hello data: %s" %
+                output) from exc
 
     def _wait_for_primary(self):
         deadline = time.time() + CONF.mongodb.add_members_timeout
@@ -412,7 +467,13 @@ class MongoDbApp(service.BaseDbApp):
         return documents
 
     def initialize_replica_set(self, members):
-        """Initialize this member's replica set and wait until primary."""
+        """Initialize this member's replica set and wait until primary.
+
+        Guest readiness means that each local MongoDB process is healthy, but
+        the Neutron path between freshly-created VMs can lag by a few seconds.
+        MongoDB's quorum check is strict, so retry only the transient network
+        and quorum errors until the normal cluster operation timeout expires.
+        """
         if not self.cluster_config or not self.cluster_config.get(
                 "replica_set_name"):
             raise exception.TroveError(
@@ -428,9 +489,32 @@ class MongoDbApp(service.BaseDbApp):
             "try { rs.status(); print(JSON.stringify({already: true})); } "
             "catch (e) { print(JSON.stringify(rs.initiate(config))); }"
         ) % json.dumps(config, separators=(",", ":"))
-        self._run_mongosh(script)
-        self._wait_for_primary()
-        return True
+        deadline = time.time() + CONF.mongodb.add_members_timeout
+        last_error = None
+        while time.time() < deadline:
+            try:
+                self._run_mongosh(script)
+                self._wait_for_primary()
+                return True
+            except Exception as exc:
+                message = str(exc)
+                transient = any(marker in message for marker in (
+                    "quorum check failed",
+                    "No route to host",
+                    "Connection refused",
+                    "Connection timed out",
+                    "No host described in new configuration"))
+                if not transient:
+                    raise
+                last_error = exc
+                LOG.warning(
+                    "MongoDB replica-set peers are not reachable yet; "
+                    "retrying initialization: %s", message)
+                time.sleep(2)
+
+        raise exception.TroveError(
+            "MongoDB replica set did not become reachable in time: %s" %
+            last_error)
 
     def prep_primary(self):
         """Compatibility operation used by Trove's stock MongoDB strategy."""
@@ -457,18 +541,42 @@ class MongoDbApp(service.BaseDbApp):
     def remove_replica_members(self, members):
         """Remove members from this replica set before Nova deletion."""
         hosts = [str(member) for member in members]
-        script = (
-            "const hosts = %s; "
-            "const hello = db.hello(); "
-            "if (hello.isWritablePrimary && hosts.includes(hello.me)) { "
-            "try { rs.stepDown(60, 15); } catch (e) {} "
-            "print(JSON.stringify({ok: 1, stepped_down: true})); "
-            "} else { "
-            "for (const host of hosts) { rs.remove(host); } "
-            "print(JSON.stringify({ok: 1, removed: true, hosts: hosts})); "
-            "}"
-        ) % json.dumps(hosts, separators=(",", ":"))
-        output = self._run_mongosh(script)
+        hello = self._replica_hello()
+        local_host = hello.get("me")
+        primary_host = hello.get("primary")
+        if hello.get("isWritablePrimary"):
+            primary_host = local_host or primary_host
+        if not primary_host:
+            raise exception.TroveError(
+                "MongoDB replica set has no elected primary")
+
+        def host_matches(left, right):
+            return (str(left or "") == str(right or "") or
+                    self._mongosh_host(left) == self._mongosh_host(right))
+
+        primary_is_removed = any(
+            host_matches(primary_host, host) for host in hosts)
+        if primary_is_removed:
+            script = (
+                "try { rs.stepDown(60, 15); } catch (e) {} "
+                "print(JSON.stringify({ok: 1, stepped_down: true}));"
+            )
+        else:
+            script = (
+                "const hosts = %s; "
+                "for (const host of hosts) { "
+                "try { rs.remove(host); } catch (e) { "
+                "if (e.codeName !== 'MemberNotFound') throw e; } } "
+                "print(JSON.stringify({ok: 1, removed: true, hosts: hosts}));"
+            ) % json.dumps(hosts, separators=(",", ":"))
+
+        # Trove can call this operation through any member.  MongoDB only
+        # accepts replSet reconfiguration on the writable primary, so route
+        # the command to the elected primary instead of attempting rs.remove
+        # on a secondary and turning an expected topology transition into an
+        # RPC error.
+        output = self._run_mongosh(
+            script, host=self._mongosh_host(primary_host))
         try:
             return json.loads(output)
         except ValueError:
@@ -551,5 +659,19 @@ class MongoDbApp(service.BaseDbApp):
         return json.loads(self._run_mongosh(script))
 
     def cluster_complete(self):
-        """Keep the stock guest-agent cluster-complete RPC harmless."""
+        """Finish clustered preparation and publish the real service state.
+
+        Trove deliberately leaves clustered guests in ``INSTANCE_READY``
+        while the task manager assembles the topology.  The stock MongoDB
+        guest strategy does not provide a completion hook, so without this
+        transition the prepare marker is never written and the guest-agent
+        heartbeat expires shortly after cluster creation.
+        """
+        status = self.status.get_actual_db_status()
+        if status != service_status.ServiceStatuses.HEALTHY:
+            raise exception.TroveError(
+                "MongoDB container is not healthy after cluster setup: %s" %
+                status)
+        self.status.set_ready()
+        self.status.set_status(status, force=True)
         return True
