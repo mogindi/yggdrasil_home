@@ -268,6 +268,23 @@ wait_for_lxc_exec() {
   die "LXC VM $LXC_NAME did not become ready"
 }
 
+wait_for_lxc_cloud_init() {
+  local attempt status
+  for attempt in $(seq 1 180); do
+    status="$(lxc exec "$LXC_NAME" -- cloud-init status 2>/dev/null || true)"
+    case "$status" in
+      *"status: done"*)
+        return 0
+        ;;
+      *"status: error"*)
+        die "LXC VM $LXC_NAME cloud-init reported an error"
+        ;;
+    esac
+    sleep 2
+  done
+  die "LXC VM $LXC_NAME cloud-init did not finish"
+}
+
 wait_for_glance_active() {
   local image_id="$1"
   local attempt status
@@ -411,7 +428,7 @@ EOF
 
   wait_for_lxc_exec
   log "Waiting for LXC cloud-init"
-  lxc exec "$LXC_NAME" -- cloud-init status --wait
+  wait_for_lxc_cloud_init
 
   lxc file push "$GUEST_SCRIPT" "$LXC_NAME/root/omarchy-image-guest.sh"
   lxc exec "$LXC_NAME" -- chmod 0700 /root/omarchy-image-guest.sh
