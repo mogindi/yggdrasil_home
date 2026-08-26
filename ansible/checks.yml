@@ -2,9 +2,6 @@
   hosts: deployment_nodes
   any_errors_fatal: true
   tasks:
-    # - name: Ensure hardening via rc.local working fine
-    #   command: systemctl is-active rc-local | grep -q ^active$
-
     - name: Check interfaces exist
       command: ifconfig {{ item }}
       loop:
