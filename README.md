@@ -205,6 +205,9 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
    - `openstack_release`,
    - DNS forwarders (`openstack_designate_forwarders_*`),
    - `openstack_ceph_rgw_hosts` values,
+   - the RadosGW Cinder backup settings (`openstack_cinder_backup_s3_*`);
+     leave the secret unset to have the RGW initialization playbook generate
+     it,
    - any environment-specific quotas and worker counts.
    - Nova utilization-aware scheduling is enabled by default with
      `cpu.virt_driver` and `cpu.percent=-1.0`. Override these with
@@ -333,9 +336,15 @@ Below is a complete catalog of Make targets in this repo.
   `ENV=aio`, this target uploads only the Ubuntu Noble image; the Magnum
   initialization also uploads the Fedora CoreOS 38 image required by its
   cluster template.
+- `openstack-cinder-backup-test` — creates temporary volumes and backups to
+  verify the RadosGW-backed Cinder full, incremental, restore, and
+  create-from-backup workflows, then removes them.
 - `symlink-etc-kolla` — symlinks `workspace/etc/kolla/*` into `/etc/kolla/`.
 - `openstack-octavia` — initializes Octavia resources.
-- `openstack-rgw` — initializes RGW resources.
+- `openstack-rgw` — initializes RGW resources and configures Cinder's S3
+  backup driver to use the root RadosGW endpoint at the internal VIP on port
+  `6780`. It creates a dedicated non-admin RGW S3 user and stores its generated
+  secret only in the ignored Kolla `globals.d` configuration.
 - `openstack-magnum` — initializes Magnum resources.
 - `openstack-manila` — initializes Manila resources.
 - `openstack-trove` — initializes Trove resources and registers MongoDB when its

@@ -103,6 +103,9 @@ openstack-octavia:
 openstack-rgw:
 	ansible-playbook ansible/openstack_initialize/rgw.yml $(ARGS)
 
+openstack-cinder-backup-test:
+	scripts/tests/cinder-backup.sh
+
 openstack-magnum:
 #	scripts/tests/magnum.sh
 	ansible-playbook ansible/openstack_initialize/magnum.yml $(ARGS)

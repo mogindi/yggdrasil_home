@@ -1,10 +1,23 @@
 - name: Configure RGW
   hosts: deployment_controller
   any_errors_fatal: true
+  vars:
+    # Cinder's S3 backup driver talks to the root RadosGW S3 API.  Keep these
+    # values overridable per inventory, while making the default endpoint the
+    # HAProxy VIP rather than the Swift compatibility URL.
+    cinder_backup_s3_user: "{{ openstack_cinder_backup_s3_user | default('cinder-backup') }}"
+    cinder_backup_s3_access_key: "{{ openstack_cinder_backup_s3_access_key | default('CINDERBACKUP') }}"
+    cinder_backup_s3_bucket: "{{ openstack_cinder_backup_s3_bucket | default('cinder-backups') }}"
+    cinder_backup_s3_endpoint_url: >-
+      {{ openstack_cinder_backup_s3_endpoint_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':6780') }}
+    cinder_backup_s3_configured_secret_key: >-
+      {{ openstack_cinder_backup_s3_secret_key | default('', true) }}
+    kolla_config_dir: "{{ playbook_dir }}/../../workspace/etc/kolla"
   tasks:
     - name: Get RGW clients
       shell: ceph auth list | grep ^client.rgw
       register: ceph_rgw_clients
+      changed_when: false
 
     - name: Configure RGW
       shell: |
@@ -31,12 +44,205 @@
         ceph config set {{ rgw_client }} rgw_frontends "beast endpoint={{ hostvars[node].network_ceph_public_ip | ansible.utils.ipaddr('address') }}:6780"
         {% endfor %}
 
+    - name: Check for the Cinder backup RGW user
+      ansible.builtin.command:
+        argv:
+          - radosgw-admin
+          - user
+          - info
+          - "--uid={{ cinder_backup_s3_user }}"
+      register: cinder_backup_user_info
+      changed_when: false
+      failed_when: cinder_backup_user_info.rc not in [0, 22]
+      no_log: true
+
+    - name: Generate a secret for a new Cinder backup RGW user
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - rand
+          - -hex
+          - "32"
+      register: cinder_backup_generated_secret_key
+      changed_when: false
+      when:
+        - cinder_backup_user_info.rc == 22
+        - not cinder_backup_s3_configured_secret_key
+      no_log: true
+
+    - name: Create the Cinder backup RGW user
+      ansible.builtin.command:
+        argv:
+          - radosgw-admin
+          - user
+          - create
+          - "--uid={{ cinder_backup_s3_user }}"
+          - "--display-name=Cinder volume backups"
+          - "--access-key={{ cinder_backup_s3_access_key }}"
+          - "--secret-key={{ cinder_backup_s3_configured_secret_key or cinder_backup_generated_secret_key.stdout }}"
+      when: cinder_backup_user_info.rc == 22
+      no_log: true
+
+    - name: Read the Cinder backup RGW user keys
+      ansible.builtin.command:
+        argv:
+          - radosgw-admin
+          - user
+          - info
+          - "--uid={{ cinder_backup_s3_user }}"
+      register: cinder_backup_user_info_after_create
+      changed_when: false
+      no_log: true
+
+    - name: Select the configured Cinder backup S3 access key
+      ansible.builtin.set_fact:
+        cinder_backup_s3_key: >-
+          {{ ((cinder_backup_user_info_after_create.stdout | from_json)['keys'] | default([])
+          | selectattr('access_key', 'equalto', cinder_backup_s3_access_key)
+          | list | first) | default({}, true) }}
+      no_log: true
+
+    - name: Generate a secret for a missing Cinder backup S3 access key
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - rand
+          - -hex
+          - "32"
+      register: cinder_backup_generated_missing_key_secret
+      changed_when: false
+      when:
+        - cinder_backup_s3_key | length == 0
+        - not cinder_backup_s3_configured_secret_key
+      no_log: true
+
+    - name: Add the configured Cinder backup S3 access key
+      ansible.builtin.command:
+        argv:
+          - radosgw-admin
+          - key
+          - create
+          - "--uid={{ cinder_backup_s3_user }}"
+          - --key-type=s3
+          - "--access-key={{ cinder_backup_s3_access_key }}"
+          - "--secret-key={{ cinder_backup_s3_configured_secret_key or cinder_backup_generated_missing_key_secret.stdout }}"
+      when: cinder_backup_s3_key | length == 0
+      no_log: true
+
+    - name: Read the final Cinder backup RGW user keys
+      ansible.builtin.command:
+        argv:
+          - radosgw-admin
+          - user
+          - info
+          - "--uid={{ cinder_backup_s3_user }}"
+      register: cinder_backup_user_info_final
+      changed_when: false
+      no_log: true
+
+    - name: Select the final Cinder backup S3 credentials
+      ansible.builtin.set_fact:
+        cinder_backup_s3_key: >-
+          {{ ((cinder_backup_user_info_final.stdout | from_json)['keys'] | default([])
+          | selectattr('access_key', 'equalto', cinder_backup_s3_access_key)
+          | list | first) | default({}, true) }}
+      no_log: true
+
+    - name: Verify the Cinder backup RGW credentials
+      ansible.builtin.assert:
+        that:
+          - cinder_backup_s3_key.get('access_key') == cinder_backup_s3_access_key
+          - cinder_backup_s3_key.get('secret_key', '') | length > 0
+        fail_msg: The Cinder backup RGW user does not have the configured S3 key.
+      no_log: true
+
+    - name: Ensure Kolla's extra globals directory exists
+      ansible.builtin.file:
+        path: "{{ kolla_config_dir }}/globals.d"
+        state: directory
+        mode: '0700'
+
+    - name: Configure Cinder backups to use RadosGW S3
+      ansible.builtin.copy:
+        dest: "{{ kolla_config_dir }}/globals.d/cinder-backup-s3.yml"
+        mode: '0600'
+        content: |
+          cinder_backup_driver: s3
+          cinder_backup_s3_url: {{ cinder_backup_s3_endpoint_url | to_json }}
+          cinder_backup_s3_bucket: {{ cinder_backup_s3_bucket | to_json }}
+          cinder_backup_s3_access_key: {{ cinder_backup_s3_access_key | to_json }}
+          cinder_backup_s3_secret_key: {{ cinder_backup_s3_key.get('secret_key') | to_json }}
+      no_log: true
+
 - name: Restart RGW
   hosts: deployment_nodes
   any_errors_fatal: true
   serial: 1
   tasks:
     - shell: sleep 10 && (systemctl | grep ceph-.*@rgw. | awk '{print $1}' | xargs systemctl restart)
+
+- name: Apply Cinder backup configuration
+  hosts: deployment_controller
+  any_errors_fatal: true
+  vars:
+    cinder_backup_s3_endpoint_url: >-
+      {{ openstack_cinder_backup_s3_endpoint_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':6780') }}
+    cinder_backup_s3_bucket: "{{ openstack_cinder_backup_s3_bucket | default('cinder-backups') }}"
+  tasks:
+    - name: Reconfigure Cinder with the RadosGW backup driver
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../../scripts/kolla-ansible/kolla-ansible.sh"
+          - reconfigure
+          - -t
+          - cinder
+        chdir: "{{ playbook_dir }}/../.."
+      no_log: true
+
+    - name: Verify Cinder backup is configured for RadosGW S3
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - cinder_backup
+          - grep
+          - -Fqx
+          - backup_driver = cinder.backup.drivers.s3.S3BackupDriver
+          - /etc/cinder/cinder.conf
+      register: cinder_backup_driver_check
+      changed_when: false
+      failed_when: cinder_backup_driver_check.rc != 0
+      no_log: true
+
+    - name: Verify Cinder backup points at the RadosGW endpoint
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - cinder_backup
+          - grep
+          - -Fqx
+          - "backup_s3_endpoint_url = {{ cinder_backup_s3_endpoint_url }}"
+          - /etc/cinder/cinder.conf
+      register: cinder_backup_endpoint_check
+      changed_when: false
+      failed_when: cinder_backup_endpoint_check.rc != 0
+      no_log: true
+
+    - name: Verify Cinder backup uses the configured RadosGW bucket
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - cinder_backup
+          - grep
+          - -Fqx
+          - "backup_s3_store_bucket = {{ cinder_backup_s3_bucket }}"
+          - /etc/cinder/cinder.conf
+      register: cinder_backup_bucket_check
+      changed_when: false
+      failed_when: cinder_backup_bucket_check.rc != 0
+      no_log: true
 
 - name: Test RGW
   hosts: deployment_controller
