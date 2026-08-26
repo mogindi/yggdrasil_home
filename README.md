@@ -206,6 +206,15 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
    - DNS forwarders (`openstack_designate_forwarders_*`),
    - `openstack_ceph_rgw_hosts` values,
    - any environment-specific quotas and worker counts.
+   - Nova utilization-aware scheduling is enabled by default with
+     `cpu.virt_driver` and `cpu.percent=-1.0`. Override these with
+     `openstack_nova_compute_monitors` and
+     `openstack_nova_metrics_weight_setting` when needed.
+   - `openstack_zun_host_shared_with_nova` defaults to `true`, so Zun and
+     Nova use the same Placement provider on shared compute hosts. In this
+     mode, Zun preserves the Nova/Placement allocation ratios; the
+     `openstack_zun_*_allocation_ratio` values apply when Zun uses its own
+     provider.
 
 7. **Validate inventory before deployment**
 

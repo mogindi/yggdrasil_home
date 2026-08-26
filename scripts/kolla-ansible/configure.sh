@@ -4,9 +4,12 @@
 
 CONFIG_DIR=etc/kolla
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+: "${OPENSTACK_NOVA_COMPUTE_MONITORS:=cpu.virt_driver}"
+: "${OPENSTACK_NOVA_METRICS_WEIGHT_SETTING:=cpu.percent=-1.0}"
 : "${OPENSTACK_ZUN_KATA_ENABLED:=no}"
 : "${OPENSTACK_ZUN_CPU_ALLOCATION_RATIO:=8.0}"
 : "${OPENSTACK_ZUN_RAM_ALLOCATION_RATIO:=1.5}"
+: "${OPENSTACK_ZUN_HOST_SHARED_WITH_NOVA:=true}"
 : "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED:=no}"
 
 is_enabled() {
@@ -274,6 +277,9 @@ EOF
 config_dir=etc/kolla/config/nova
 mkdir -p $config_dir
 cat > $config_dir/nova-compute.conf <<EOF
+[DEFAULT]
+compute_monitors = $OPENSTACK_NOVA_COMPUTE_MONITORS
+
 [glance]
 enable_rbd_download = true
 rbd_user = {{ ceph_glance_user }}
@@ -283,6 +289,10 @@ rbd_connect_timeout = 5
 
 [libvirt]
 cpu_mode = host-passthrough
+EOF
+cat > $config_dir/nova-scheduler.conf <<EOF
+[metrics]
+weight_setting = $OPENSTACK_NOVA_METRICS_WEIGHT_SETTING
 EOF
 
 # Keep project-scoped reader users from mutating Nova keypairs. Kolla copies
@@ -345,9 +355,17 @@ fi
 cat >> etc/kolla/config/zun.conf <<EOF
 
 [compute]
+host_shared_with_nova = $OPENSTACK_ZUN_HOST_SHARED_WITH_NOVA
+EOF
+
+# A shared Nova/Zun provider has one Placement inventory.  Let Nova/Placement
+# own its allocation ratios instead of having Zun overwrite them periodically.
+if ! is_enabled "$OPENSTACK_ZUN_HOST_SHARED_WITH_NOVA"; then
+	cat >> etc/kolla/config/zun.conf <<EOF
 cpu_allocation_ratio = $OPENSTACK_ZUN_CPU_ALLOCATION_RATIO
 ram_allocation_ratio = $OPENSTACK_ZUN_RAM_ALLOCATION_RATIO
 EOF
+fi
 
 # Keep function collection and CloudKitty publication disabled unless the
 # single function rating switch is enabled.
