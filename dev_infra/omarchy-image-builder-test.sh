@@ -37,6 +37,7 @@ grep -Fq -- 'OMARCHY_ISO_VERSION=4.0.1' <<<"$dry_run_output" || fail "dry-run di
 grep -Fq -- 'OMARCHY_IMAGE_NAME=omarchy-latest' <<<"$dry_run_output" || fail "dry-run did not show the default image name"
 grep -Fq -- 'OMARCHY_OUTPUT_FORMAT=raw' <<<"$dry_run_output" || fail "dry-run did not show the default output format"
 grep -Fq -- 'OMARCHY_LXC_IMAGE_SOURCE=ubuntu:24.04' <<<"$dry_run_output" || fail "dry-run did not show the default LXC image"
+grep -Fq -- 'OMARCHY_GUEST_MEMORY=6G' <<<"$dry_run_output" || fail "dry-run does not leave nested memory headroom"
 
 if OMARCHY_OUTPUT_FORMAT=invalid \
   OMARCHY_ISO_URL=https://iso.omarchy.org/omarchy-4.0.1.iso \
