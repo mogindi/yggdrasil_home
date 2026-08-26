@@ -120,7 +120,8 @@ and copy the pinned `kata_version`, `kata_architectures`, and `kata_checksums`
 values from one of the supplied inventories. The deployment then performs
 these steps in order:
 
-1. `ansible/docker.yml` installs Docker without exposing its remote API.
+1. `ansible/docker.yml` installs Docker without exposing its remote API and
+   removes any legacy unauthenticated listener override.
 2. `ansible/devices.yml` installs and validates Kata, creates the private
    Docker PKI, and enables a mutually authenticated Docker listener on each
    node's OpenStack management address at port 2376.

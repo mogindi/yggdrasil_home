@@ -36,6 +36,22 @@
       when: not docker_daemon_json.stat.exists
       register: docker_daemon_json_configured
 
+    - name: Check for legacy unauthenticated Docker API override
+      slurp:
+        src: /etc/systemd/system/docker.service.d/override.conf
+      register: docker_service_override
+      changed_when: false
+      failed_when: false
+
+    - name: Remove legacy unauthenticated Docker API override
+      file:
+        path: /etc/systemd/system/docker.service.d/override.conf
+        state: absent
+      register: docker_legacy_api_override_removed
+      when:
+        - docker_service_override.content is defined
+        - "'tcp://0.0.0.0:2375' in (docker_service_override.content | b64decode)"
+
     - name: Overwrite docker source
       vars:
         os_release: "{% if (openstack_release|string) == '2025.2' %}noble{% else %}jammy{% endif %}"
@@ -74,4 +90,13 @@
         name: docker
         state: restarted
         enabled: yes
-      when: docker_installed.changed or docker_daemon_json_configured.changed
+        daemon_reload: yes
+      when:
+        - >-
+          docker_installed.changed
+          or docker_daemon_json_configured.changed
+          or (docker_legacy_api_override_removed.changed | default(false))
+
+    - name: Verify unauthenticated Docker API is disabled
+      shell: "! ss -ltnH 'sport = :2375' | grep -q ."
+      changed_when: false
