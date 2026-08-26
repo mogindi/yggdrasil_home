@@ -105,6 +105,12 @@ set_global_config enable_mistral yes
 #set_global_config enable_neutron_vpnaas yes  # broken in 2025.1
 set_global_config enable_octavia yes
 set_global_config enable_prometheus yes
+# Keep Nova API collection on the stable microversion supported by the
+# deployment, and omit Nova's obsolete security-group metric. Security groups
+# are managed by Neutron ports; the Neutron security-group metric remains
+# enabled by the exporter defaults.
+set_global_config prometheus_openstack_exporter_compute_api_version '"2.1"'
+set_global_config prometheus_openstack_exporter_cmdline_extras '"--disable-metric=nova-security-groups"'
 #set_global_config enable_redis yes
 set_global_config enable_valkey yes
 set_global_config enable_sahara yes
