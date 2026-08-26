@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """List resources visible to an OpenStack project.
 
-Endpoint discovery deliberately uses the core OpenStack CLI because it is
-available independently of service-specific CLI plugins.  Resource
-enumeration is performed through Python SDKs: openstacksdk proxies are used
-when available, with dynamically discovered legacy client SDKs as a fallback.
+Endpoint discovery uses the authenticated openstacksdk Keystone catalog,
+which is the Python equivalent of the core endpoint-list operation and does
+not need service-specific CLI plugins.  The core OpenStack CLI is retained as
+a catalog fallback. Resource enumeration is performed through Python SDKs:
+openstacksdk proxies are used when available, with dynamically discovered
+legacy client SDKs as a fallback.
 
 The command fails if an enabled, selected endpoint cannot be mapped to a
 list-capable Python client, or if any resource request fails.  This prevents a
@@ -341,25 +343,31 @@ def _run_endpoint_command(binary: str, timeout: int = 60) -> list[Endpoint]:
     return parse_endpoint_list_json(completed.stdout)
 
 
-def discover_endpoints(binary: str, connection: Any | None = None) -> list[Endpoint]:
-    """Discover endpoints with the core CLI, falling back to SDK catalog data."""
+def discover_endpoints(connection: Any, binary: str = "openstack") -> list[Endpoint]:
+    """Discover endpoints from openstacksdk, with the CLI as a fallback."""
+
+    try:
+        return _catalog_endpoints(connection.service_catalog)
+    except InventoryError as catalog_error:
+        catalog_failure = catalog_error
+    except Exception as exc:
+        catalog_failure = EndpointDiscoveryError(
+            f"could not read the Keystone service catalog with openstacksdk: {exc}"
+        )
 
     resolved_binary = shutil.which(binary) or binary
     try:
         return _run_endpoint_command(resolved_binary)
-    except FileNotFoundError:
-        if connection is None:
-            raise EndpointDiscoveryError(
-                f"cannot run {binary!r} and no SDK connection is available for catalog fallback"
-            )
-        try:
-            return _catalog_endpoints(connection.service_catalog)
-        except InventoryError:
-            raise
-        except Exception as exc:
-            raise EndpointDiscoveryError(
-                f"could not read the Keystone service catalog with openstacksdk: {exc}"
-            ) from exc
+    except FileNotFoundError as cli_error:
+        raise EndpointDiscoveryError(
+            f"openstacksdk endpoint discovery failed: {catalog_failure}; "
+            f"CLI fallback {binary!r} is unavailable"
+        ) from cli_error
+    except EndpointDiscoveryError as cli_error:
+        raise EndpointDiscoveryError(
+            f"openstacksdk endpoint discovery failed: {catalog_failure}; "
+            f"CLI fallback also failed: {cli_error}"
+        ) from cli_error
 
 
 def select_endpoints(
@@ -1367,7 +1375,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--openstack-bin",
         default=os.environ.get("OPENSTACK_BIN", "openstack"),
-        help="Core OpenStack executable used for endpoint discovery.",
+        help="Core OpenStack executable used as the endpoint-discovery fallback.",
     )
     parser.add_argument("--debug", action="store_true", help="Show a traceback on failure.")
     return parser
@@ -1376,15 +1384,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        # Prefer the core CLI without creating an SDK connection.  The SDK
-        # connection is only needed before discovery when the executable is
-        # absent and its Keystone catalog must be used as the equivalent path.
-        if shutil.which(args.openstack_bin):
-            endpoints = discover_endpoints(args.openstack_bin)
-            connection = _connect(args.interface, args.region)
-        else:
-            connection = _connect(args.interface, args.region)
-            endpoints = discover_endpoints(args.openstack_bin, connection)
+        # Use the SDK's authenticated Keystone catalog first.  The core CLI
+        # remains an equivalent fallback for unusual SDK/catalog failures.
+        connection = _connect(args.interface, args.region)
+        endpoints = discover_endpoints(connection, args.openstack_bin)
         endpoints = select_endpoints(endpoints, args.interface, args.region)
         project = resolve_project(connection, args.project)
         report = inventory(endpoints, connection, project)

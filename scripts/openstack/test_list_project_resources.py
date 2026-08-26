@@ -52,37 +52,8 @@ class EndpointTests(unittest.TestCase):
         endpoints = inventory.parse_endpoint_list_json(payload)
         self.assertEqual([endpoint.service_type for endpoint in endpoints], ["compute"])
 
-    @mock.patch.object(inventory, "subprocess")
-    def test_endpoint_command_is_the_primary_discovery_path(self, subprocess: mock.Mock) -> None:
-        subprocess.run.return_value = types.SimpleNamespace(
-            returncode=0,
-            stdout=json.dumps(
-                [
-                    {
-                        "ID": "one",
-                        "Region": "RegionOne",
-                        "Service Name": "Nova",
-                        "Service Type": "compute",
-                        "Enabled": True,
-                        "Interface": "public",
-                        "URL": "https://nova.example/",
-                    }
-                ]
-            ),
-            stderr="",
-        )
-        endpoints = inventory.discover_endpoints("openstack")
-        subprocess.run.assert_called_once_with(
-            ["openstack", "endpoint", "list", "-f", "json"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        self.assertEqual(endpoints[0].service_type, "compute")
-
-    @mock.patch.object(inventory, "_run_endpoint_command", side_effect=FileNotFoundError("openstack"))
-    def test_missing_cli_uses_sdk_catalog_fallback(self, _: mock.Mock) -> None:
+    @mock.patch.object(inventory, "_run_endpoint_command")
+    def test_sdk_catalog_is_the_primary_discovery_path(self, run_command: mock.Mock) -> None:
         connection = types.SimpleNamespace(
             service_catalog=[
                 {
@@ -100,20 +71,33 @@ class EndpointTests(unittest.TestCase):
                 }
             ]
         )
-        endpoints = inventory.discover_endpoints("missing-openstack", connection)
+        endpoints = inventory.discover_endpoints(connection, "openstack")
+        run_command.assert_not_called()
         self.assertEqual(endpoints[0].url, "https://nova.example/")
 
-    @mock.patch.object(inventory, "subprocess")
-    def test_endpoint_command_failure_is_not_hidden_by_catalog_fallback(
-        self, subprocess: mock.Mock
+    @mock.patch.object(inventory, "_run_endpoint_command", side_effect=FileNotFoundError("openstack"))
+    def test_missing_cli_is_only_used_after_sdk_catalog_failure(self, _: mock.Mock) -> None:
+        connection = types.SimpleNamespace(service_catalog=[])
+        with self.assertRaisesRegex(inventory.EndpointDiscoveryError, "unavailable"):
+            inventory.discover_endpoints(connection, "missing-openstack")
+
+    @mock.patch.object(inventory, "_run_endpoint_command")
+    def test_cli_fallback_is_used_when_sdk_catalog_fails(self, run_command: mock.Mock) -> None:
+        run_command.return_value = [
+            inventory.Endpoint(
+                "one", "RegionOne", "Nova", "compute", "compute", "public", "https://nova.example/"
+            )
+        ]
+        endpoints = inventory.discover_endpoints(types.SimpleNamespace(service_catalog=[]), "openstack")
+        run_command.assert_called_once_with("openstack")
+        self.assertEqual(endpoints[0].service_type, "compute")
+
+    @mock.patch.object(inventory, "_run_endpoint_command", side_effect=inventory.EndpointDiscoveryError("Unauthorized"))
+    def test_endpoint_command_failure_is_not_hidden_by_catalog_failure(
+        self, _: mock.Mock
     ) -> None:
-        subprocess.run.return_value = types.SimpleNamespace(
-            returncode=1,
-            stdout="",
-            stderr="Unauthorized",
-        )
         with self.assertRaisesRegex(inventory.EndpointDiscoveryError, "Unauthorized"):
-            inventory.discover_endpoints("openstack", types.SimpleNamespace(service_catalog=[]))
+            inventory.discover_endpoints(types.SimpleNamespace(service_catalog=[]), "openstack")
 
     def test_alias_selection_prefers_canonical_or_newest_version(self) -> None:
         endpoints = [

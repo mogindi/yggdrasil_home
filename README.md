@@ -266,15 +266,16 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
    make openstack-project-resources PROJECT=admin
    ```
 
-   The CLI first calls `openstack endpoint list -f json` from Python (and uses
-   the Keystone catalog through `openstacksdk` only if the executable is not
-   installed). It then resolves each selected endpoint to an installed
-   `openstacksdk` service proxy or legacy Python client and enumerates its
-   project-scoped resources. It exits nonzero if an endpoint has no matching
-   list-capable client or if a client/list request fails, so the output is
-   never presented as a complete inventory when it is partial. New services
-   integrated into `openstacksdk` or registered as OpenStack client plugins are
-   discovered without editing this script.
+   The CLI first reads the authenticated Keystone catalog through
+   `openstacksdk` (the Python equivalent of `openstack endpoint list -f json`).
+   It uses the core `openstack endpoint list -f json` command only as a
+   fallback if the SDK cannot read the catalog. It then resolves each selected
+   endpoint to an installed `openstacksdk` service proxy or legacy Python
+   client and enumerates its project-scoped resources. It exits nonzero if an
+   endpoint has no matching list-capable client or if a client/list request
+   fails, so the output is never presented as a complete inventory when it is
+   partial. New services integrated into `openstacksdk` or registered as
+   OpenStack client plugins are discovered without editing this script.
 
 10. **Operate and maintain**
     - Reconfigure services after variable updates:
