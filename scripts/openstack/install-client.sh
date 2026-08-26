@@ -13,6 +13,7 @@ source kolla-venv/bin/activate
 
 # install openstack clients
 pip install -U -c https://releases.openstack.org/constraints/upper/$OPENSTACK_RELEASE \
+  openstacksdk \
   python-openstackclient \
   python-heatclient \
   python-troveclient \

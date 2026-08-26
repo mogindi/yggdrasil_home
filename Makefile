@@ -82,6 +82,10 @@ alertmanager-pagerduty:
 openstack-client-install:
 	ansible-playbook ansible/client.yml $(ARGS)
 
+openstack-project-resources:
+	@test -n "$(PROJECT)" || (echo "PROJECT is required, for example: make openstack-project-resources PROJECT=admin" >&2; exit 2)
+	@if [[ -f workspace/kolla-venv/bin/activate ]]; then source workspace/kolla-venv/bin/activate; fi; scripts/openstack/list-project-resources.py --project "$(PROJECT)" $(ARGS)
+
 openstack-resources-init:
 	ansible-playbook ansible/init_resources.yml $(ARGS)
 	#scripts/openstack/init-resources.sh

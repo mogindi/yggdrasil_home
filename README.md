@@ -255,6 +255,27 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
    openstack volume service list
    ```
 
+   To inventory the resources visible to one project, run the repository CLI
+   after sourcing the same credentials and client virtual environment:
+
+   ```bash
+   source workspace/kolla-venv/bin/activate
+   scripts/openstack/list-project-resources.py --project admin
+   scripts/openstack/list-project-resources.py --project admin --format json
+   # equivalent Make target:
+   make openstack-project-resources PROJECT=admin
+   ```
+
+   The CLI first calls `openstack endpoint list -f json` from Python (and uses
+   the Keystone catalog through `openstacksdk` only if the executable is not
+   installed). It then resolves each selected endpoint to an installed
+   `openstacksdk` service proxy or legacy Python client and enumerates its
+   project-scoped resources. It exits nonzero if an endpoint has no matching
+   list-capable client or if a client/list request fails, so the output is
+   never presented as a complete inventory when it is partial. New services
+   integrated into `openstacksdk` or registered as OpenStack client plugins are
+   discovered without editing this script.
+
 10. **Operate and maintain**
     - Reconfigure services after variable updates:
       - `make kollaansible-reconfigure ENV=${ENV}`
@@ -331,6 +352,10 @@ Below is a complete catalog of Make targets in this repo.
 ### OpenStack initialization targets
 
 - `openstack-client-install` — installs OpenStack client tooling.
+- `openstack-project-resources` — lists all resources visible to `PROJECT`,
+  using the Python SDKs discovered from the endpoint catalog. Pass
+  `ARGS="--format json"` for machine-readable output; missing clients and list
+  failures are hard errors.
 - `openstack-resources-init` — initializes OpenStack resources.
 - `openstack-images-upload` — uploads the default cloud image set. When run with
   `ENV=aio`, this target uploads only the Ubuntu Noble image; the Magnum
