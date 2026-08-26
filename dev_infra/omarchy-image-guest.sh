@@ -10,6 +10,7 @@ DISK_SIZE="${OMARCHY_DISK_SIZE:-50G}"
 OUTPUT_FORMAT="${OMARCHY_OUTPUT_FORMAT:-raw}"
 GUEST_CPUS="${OMARCHY_GUEST_CPUS:-4}"
 GUEST_MEMORY="${OMARCHY_GUEST_MEMORY:-8G}"
+INSTALL_FIRMWARE="${OMARCHY_INSTALL_FIRMWARE:-bios}"
 INSTALL_TIMEOUT="${OMARCHY_INSTALL_TIMEOUT:-30m}"
 GUEST_BOOT_TIMEOUT="${OMARCHY_GUEST_BOOT_TIMEOUT:-20m}"
 ALLOW_TCG="${OMARCHY_ALLOW_TCG:-0}"
@@ -285,18 +286,22 @@ EOF
 }
 
 qemu_common_args() {
-  local firmware_code="$1"
-  local firmware_vars="$2"
+  local firmware_code="${1:-}"
+  local firmware_vars="${2:-}"
   local disk_args=(
     -machine q35
     -m "$GUEST_MEMORY"
     -smp "$GUEST_CPUS"
-    -drive "if=pflash,format=raw,readonly=on,file=$firmware_code"
-    -drive "if=pflash,format=raw,file=$firmware_vars"
     -drive "file=$DISK_FILE,if=virtio,format=qcow2,cache=none"
     -vga virtio
     -display none
   )
+  if [[ "$INSTALL_FIRMWARE" == uefi ]]; then
+    disk_args+=(
+      -drive "if=pflash,format=raw,readonly=on,file=$firmware_code"
+      -drive "if=pflash,format=raw,file=$firmware_vars"
+    )
+  fi
   printf '%s\n' "${disk_args[@]}"
 }
 
@@ -470,6 +475,8 @@ main() {
   command_required timeout
 
   [[ "$OUTPUT_FORMAT" == raw || "$OUTPUT_FORMAT" == qcow2 ]] || die "OMARCHY_OUTPUT_FORMAT must be raw or qcow2"
+  [[ "$INSTALL_FIRMWARE" == bios || "$INSTALL_FIRMWARE" == uefi ]] ||
+    die "OMARCHY_INSTALL_FIRMWARE must be bios or uefi"
   [[ "$ISO_URL" =~ ^https://[^[:space:]]+\.iso$ ]] || die "OMARCHY_ISO_URL must be an HTTPS .iso URL"
   [[ "$ISO_SHA256_URL" =~ ^https://[^[:space:]]+$ ]] || die "OMARCHY_ISO_SHA256_URL must be an HTTPS URL"
   [[ "$ISO_VERSION" =~ ^[0-9]+(\.[0-9]+)*$ ]] || die "OMARCHY_ISO_VERSION is invalid"
@@ -482,14 +489,16 @@ main() {
   qemu-img create -f qcow2 "$DISK_FILE" "$DISK_SIZE"
   create_cidata
 
-  local firmware_code firmware_vars
-  firmware_code="$(find_ovmf_file /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/edk2/x64/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd)" ||
-    die "Unable to find an OVMF firmware code file"
-  firmware_vars="$(find_ovmf_file /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/edk2/x64/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS.fd)" ||
-    die "Unable to find an OVMF firmware variables file"
-  cp "$firmware_vars" "$WORK_DIR/OVMF_VARS.fd"
-  firmware_vars="$WORK_DIR/OVMF_VARS.fd"
-  chmod 0600 "$firmware_vars"
+  local firmware_code="" firmware_vars=""
+  if [[ "$INSTALL_FIRMWARE" == uefi ]]; then
+    firmware_code="$(find_ovmf_file /usr/share/OVMF/OVMF_CODE_4M.fd /usr/share/edk2/x64/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE.fd)" ||
+      die "Unable to find an OVMF firmware code file"
+    firmware_vars="$(find_ovmf_file /usr/share/OVMF/OVMF_VARS_4M.fd /usr/share/edk2/x64/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS.fd)" ||
+      die "Unable to find an OVMF firmware variables file"
+    cp "$firmware_vars" "$WORK_DIR/OVMF_VARS.fd"
+    firmware_vars="$WORK_DIR/OVMF_VARS.fd"
+    chmod 0600 "$firmware_vars"
+  fi
 
   run_installer_vm "$firmware_code" "$firmware_vars"
   run_configured_guest "$firmware_code" "$firmware_vars"

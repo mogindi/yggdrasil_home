@@ -15,6 +15,7 @@ LXC_NETWORK="${OMARCHY_LXC_NETWORK:-lxdbr0}"
 OMARCHY_DISK_SIZE="${OMARCHY_DISK_SIZE:-50G}"
 OMARCHY_GUEST_CPUS="${OMARCHY_GUEST_CPUS:-4}"
 OMARCHY_GUEST_MEMORY="${OMARCHY_GUEST_MEMORY:-6G}"
+OMARCHY_INSTALL_FIRMWARE="${OMARCHY_INSTALL_FIRMWARE:-bios}"
 OMARCHY_OUTPUT_FORMAT="${OMARCHY_OUTPUT_FORMAT:-raw}"
 OMARCHY_IMAGE_NAME="${OMARCHY_IMAGE_NAME:-omarchy-latest}"
 OMARCHY_IMAGE_VISIBILITY="${OMARCHY_IMAGE_VISIBILITY:-public}"
@@ -55,7 +56,8 @@ Important environment variables:
   OMARCHY_DISK_SIZE           Nested guest disk size, minimum 32G (default: 50G).
   OMARCHY_OUTPUT_FORMAT       raw or qcow2 (default: raw).
   OMARCHY_GUEST_CPUS          Nested guest vCPU count (default: 4).
-  OMARCHY_GUEST_MEMORY        Nested guest memory (default: 8G).
+  OMARCHY_GUEST_MEMORY        Nested guest memory (default: 6G).
+  OMARCHY_INSTALL_FIRMWARE    Nested and uploaded image firmware: bios or uefi (default: bios).
   OMARCHY_LXC_IMAGE_SOURCE    LXC VM image/remote alias (default: ubuntu:24.04).
   OMARCHY_LXC_NETWORK         Managed LXD network (default: lxdbr0).
   OMARCHY_ALLOW_TCG           Set to 1 to allow software emulation if /dev/kvm is absent.
@@ -221,6 +223,10 @@ validate_configuration() {
     public|private) ;;
     *) die "OMARCHY_IMAGE_VISIBILITY must be public or private" ;;
   esac
+  case "$OMARCHY_INSTALL_FIRMWARE" in
+    bios|uefi) ;;
+    *) die "OMARCHY_INSTALL_FIRMWARE must be bios or uefi" ;;
+  esac
 }
 
 print_configuration() {
@@ -234,6 +240,7 @@ OMARCHY_DISK_SIZE=$OMARCHY_DISK_SIZE
 OMARCHY_OUTPUT_FORMAT=$OMARCHY_OUTPUT_FORMAT
 OMARCHY_GUEST_CPUS=$OMARCHY_GUEST_CPUS
 OMARCHY_GUEST_MEMORY=$OMARCHY_GUEST_MEMORY
+OMARCHY_INSTALL_FIRMWARE=$OMARCHY_INSTALL_FIRMWARE
 OMARCHY_LXC_IMAGE_SOURCE=$LXC_IMAGE_SOURCE
 OMARCHY_LXC_NETWORK=$LXC_NETWORK
 OMARCHY_LXC_NAME=$LXC_NAME
@@ -336,7 +343,7 @@ upload_image() {
     --property "os_version=$image_version"
     --property "os_admin_user=omarchy"
     --property "hw_qemu_guest_agent=yes"
-    --property "hw_firmware_type=uefi"
+    --property "hw_firmware_type=$OMARCHY_INSTALL_FIRMWARE"
     --property "hw_machine_type=q35"
     --property "hw_disk_bus=virtio"
     --property "cloud_init=enabled"
@@ -441,6 +448,7 @@ EOF
     "OMARCHY_OUTPUT_FORMAT=$OMARCHY_OUTPUT_FORMAT" \
     "OMARCHY_GUEST_CPUS=$OMARCHY_GUEST_CPUS" \
     "OMARCHY_GUEST_MEMORY=$OMARCHY_GUEST_MEMORY" \
+    "OMARCHY_INSTALL_FIRMWARE=$OMARCHY_INSTALL_FIRMWARE" \
     "OMARCHY_INSTALL_TIMEOUT=$OMARCHY_INSTALL_TIMEOUT" \
     "OMARCHY_GUEST_BOOT_TIMEOUT=$OMARCHY_GUEST_BOOT_TIMEOUT" \
     "OMARCHY_ALLOW_TCG=$OMARCHY_ALLOW_TCG" \

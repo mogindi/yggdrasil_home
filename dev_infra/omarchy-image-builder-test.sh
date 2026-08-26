@@ -38,6 +38,9 @@ grep -Fq -- 'OMARCHY_IMAGE_NAME=omarchy-latest' <<<"$dry_run_output" || fail "dr
 grep -Fq -- 'OMARCHY_OUTPUT_FORMAT=raw' <<<"$dry_run_output" || fail "dry-run did not show the default output format"
 grep -Fq -- 'OMARCHY_LXC_IMAGE_SOURCE=ubuntu:24.04' <<<"$dry_run_output" || fail "dry-run did not show the default LXC image"
 grep -Fq -- 'OMARCHY_GUEST_MEMORY=6G' <<<"$dry_run_output" || fail "dry-run does not leave nested memory headroom"
+grep -Fq -- 'OMARCHY_INSTALL_FIRMWARE=bios' <<<"$dry_run_output" || fail "dry-run does not show the safe BIOS firmware default"
+grep -Fq -- 'hw_firmware_type=$OMARCHY_INSTALL_FIRMWARE' "$HOST_SCRIPT" || fail "upload firmware metadata is not tied to the build firmware"
+grep -Fq -- 'INSTALL_FIRMWARE="${OMARCHY_INSTALL_FIRMWARE:-bios}"' "$GUEST_SCRIPT" || fail "guest builder does not default to BIOS firmware"
 
 if OMARCHY_OUTPUT_FORMAT=invalid \
   OMARCHY_ISO_URL=https://iso.omarchy.org/omarchy-4.0.1.iso \

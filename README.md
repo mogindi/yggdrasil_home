@@ -46,6 +46,10 @@ The Omarchy image builder runs the Omarchy ISO inside a nested KVM guest,
 which itself runs in an LXC VM. It creates a clean, unencrypted image with a
 locked `omarchy` account, cloud-init, OpenSSH, and the QEMU guest agent. The
 Yggdrasil console supplies the instance password or keypair at launch time.
+The nested installer and uploaded image use BIOS firmware by default, which
+is compatible with the Omarchy ISO in this nested build environment. Set
+`OMARCHY_INSTALL_FIRMWARE=uefi` only on a host where the Omarchy ISO's UEFI
+loader is known to work.
 
 Initialize LXD once on the build host and source OpenStack credentials before
 running the builder. On a host that already has the Home Dev Infra checkout and
