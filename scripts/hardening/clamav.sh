@@ -2,18 +2,7 @@
 
 set -x
 
-CLAMAV_VERSION=1.4.1
-
-# installs all dependencies and services
-apt install -y clamav clamav-daemon
-
 systemctl stop clamav-freshclam.service clamav-daemon
-
-# updates binaries
-cd /tmp/ && \
-(ls clamav-$CLAMAV_VERSION.linux.x86_64.deb || \
-wget https://www.clamav.net/downloads/production/clamav-$CLAMAV_VERSION.linux.x86_64.deb) && \
-dpkg -i clamav-$CLAMAV_VERSION.linux.x86_64.deb
 
 # symlink newer binaries 
 ln -sf /usr/local/bin/*clam* /usr/bin/

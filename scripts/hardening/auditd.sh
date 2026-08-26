@@ -1,3 +1,5 @@
 #!/bin/bash
 
-apt install -y auditd
+set -e
+
+systemctl enable --now auditd.service

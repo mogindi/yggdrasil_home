@@ -3,6 +3,12 @@
   hosts: deployment_nodes
   any_errors_fatal: true
   vars:
+    clamav_version: '1.4.1'
+    clamav_package_version: '1.4.1-1'
+    clamav_package_url: >-
+      https://www.clamav.net/downloads/production/clamav-{{ clamav_version }}.linux.x86_64.deb
+    clamav_package_path: >-
+      /var/cache/clamav-{{ clamav_version }}.linux.x86_64.deb
     security_services:
       - name: security_auditd.service
         script: auditd.sh
@@ -29,15 +35,76 @@
     - name: Install apt packages
       apt:
         name:
+          - auditd
+          - curl
+          - lsb-release
           - openscap-scanner
           - bzip2
           - fail2ban
           - clamav
           - clamav-daemon
+          - wget
+        state: present
         update_cache: yes
 
     - name: Correct any apt package issues
       command: dpkg --configure -a
+
+    - name: Check installed ClamAV package version
+      ansible.builtin.command:
+        argv:
+          - dpkg-query
+          - -W
+          - -f=${Version}
+          - clamav
+      register: clamav_installed_version
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Download pinned ClamAV package
+      ansible.builtin.get_url:
+        url: "{{ clamav_package_url }}"
+        dest: "{{ clamav_package_path }}"
+        mode: '0644'
+        timeout: 120
+      when:
+        - clamav_installed_version.rc != 0 or clamav_installed_version.stdout != clamav_package_version
+        - not ansible_check_mode
+
+    - name: Install pinned ClamAV package
+      ansible.builtin.apt:
+        deb: "{{ clamav_package_path }}"
+        state: present
+      when:
+        - clamav_installed_version.rc != 0 or clamav_installed_version.stdout != clamav_package_version
+        - not ansible_check_mode
+
+    - name: Check whether Sysdig is installed
+      ansible.builtin.shell: command -v sysdig
+      args:
+        executable: /bin/bash
+      register: sysdig_installed
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: Install Sysdig when absent
+      ansible.builtin.shell: |
+        set -o pipefail
+        curl -fsSL https://s3.amazonaws.com/download.draios.com/stable/install-sysdig | bash
+      args:
+        executable: /bin/bash
+      when:
+        - sysdig_installed.rc != 0
+        - not ansible_check_mode
+
+    - name: Verify Sysdig installation
+      ansible.builtin.shell: command -v sysdig
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: not ansible_check_mode
 
     - name: Copy hardening folder
       copy:

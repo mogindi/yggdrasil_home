@@ -292,7 +292,7 @@ Below is a complete catalog of Make targets in this repo.
 ### Setup / infrastructure targets
 
 - `prepare-ansible` — links `/etc/ansible` to selected in-repo inventory/config.
-- `harden` — runs the host hardening playbook, installing and enabling the `security_*` systemd services.
+- `harden` — runs the host hardening playbook, idempotently installing dependencies and enabling the `security_*` systemd services.
 - `docker` — configures Docker.
 - `vpn` — configures VPN.
 - `provider-gateway-vip` — configures provider gateway VIP.
