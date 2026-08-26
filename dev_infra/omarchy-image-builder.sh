@@ -401,7 +401,9 @@ EOF
     --config "limits.cpu=$LXC_CPU" \
     --config "limits.memory=$LXC_MEMORY" \
     --config security.secureboot=false \
-    --device "eth0,name=eth0,network=$LXC_NETWORK,type=nic" \
+    --device "eth0,name=eth0" \
+    --device "eth0,network=$LXC_NETWORK" \
+    --device "eth0,type=nic" \
     --device "root,size=$LXC_ROOT_SIZE" \
     --config "cloud-init.user-data=$user_data" \
     "$LXC_IMAGE_SOURCE" "$LXC_NAME"
