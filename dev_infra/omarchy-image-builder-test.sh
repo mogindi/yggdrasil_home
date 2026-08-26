@@ -5,6 +5,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_SCRIPT="$SCRIPT_DIR/omarchy-image-builder.sh"
 GUEST_SCRIPT="$SCRIPT_DIR/omarchy-image-guest.sh"
+LXD_SCRIPT="$SCRIPT_DIR/lxc-omarchy-initialize.sh"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -13,6 +14,8 @@ fail() {
 
 bash -n "$HOST_SCRIPT" || fail "host builder has invalid shell syntax"
 bash -n "$GUEST_SCRIPT" || fail "guest builder has invalid shell syntax"
+bash -n "$LXD_SCRIPT" || fail "LXD initializer has invalid shell syntax"
+grep -Fq -- '10.227.42.1/24' "$LXD_SCRIPT" || fail "LXD initializer uses the host network CIDR"
 grep -Fq -- 'hw_qemu_guest_agent=yes' "$HOST_SCRIPT" || fail "upload metadata omits qemu guest agent"
 grep -Fq -- 'cloud-init' "$GUEST_SCRIPT" || fail "guest builder omits cloud-init"
 grep -Fq -- 'qemu-guest-agent' "$GUEST_SCRIPT" || fail "guest builder omits qemu guest agent"

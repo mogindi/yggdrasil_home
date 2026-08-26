@@ -48,13 +48,19 @@ locked `omarchy` account, cloud-init, OpenSSH, and the QEMU guest agent. The
 Yggdrasil console supplies the instance password or keypair at launch time.
 
 Initialize LXD once on the build host and source OpenStack credentials before
-running the builder:
+running the builder. On a host that already has the Home Dev Infra checkout and
+only has a normal root filesystem, use the storage-safe initializer:
 
 ```bash
-dev_infra/lxc-initialize.sh
-source workspace/etc/kolla/admin-openrc.sh
+dev_infra/lxc-omarchy-initialize.sh
+source /root/yggdrasil_home/workspace/etc/kolla/admin-openrc.sh
+export OMARCHY_OPENSTACK_BIN=/root/yggdrasil_home/workspace/kolla-venv/bin/openstack
 make openstack-omarchy-image
 ```
+
+The regular `dev_infra/lxc-initialize.sh` remains available for the dedicated
+120-GiB ZFS Dev Infra layout. The Omarchy initializer uses a thin `dir` pool
+and `10.227.42.0/24` so it does not collide with a host on `10.227.41.0/24`.
 
 The builder resolves the current ISO URL from `https://omarchy.org`, verifies
 its adjacent `.sha256` file, and publishes the image as `omarchy-latest`.
