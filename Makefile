@@ -98,6 +98,9 @@ else
 	scripts/openstack/upload-images.sh
 endif
 
+openstack-omarchy-image:
+	dev_infra/omarchy-image-builder.sh $(OMARCHY_ARGS)
+
 symlink-etc-kolla:
 	ln -sfr workspace/etc/kolla/* /etc/kolla/
 

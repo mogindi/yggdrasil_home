@@ -40,6 +40,46 @@ git clone git@github.com:yggdrasil-cloud-dk/open-yggdrasil-stack.git
 cd open-yggdrasil-stack
 ```
 
+### Build the Omarchy OpenStack image
+
+The Omarchy image builder runs the Omarchy ISO inside a nested KVM guest,
+which itself runs in an LXC VM. It creates a clean, unencrypted image with a
+locked `omarchy` account, cloud-init, OpenSSH, and the QEMU guest agent. The
+Yggdrasil console supplies the instance password or keypair at launch time.
+
+Initialize LXD once on the build host and source OpenStack credentials before
+running the builder:
+
+```bash
+dev_infra/lxc-initialize.sh
+source workspace/etc/kolla/admin-openrc.sh
+make openstack-omarchy-image
+```
+
+The builder resolves the current ISO URL from `https://omarchy.org`, verifies
+its adjacent `.sha256` file, and publishes the image as `omarchy-latest`.
+Nested KVM is required; set `OMARCHY_ALLOW_TCG=1` only when a slow software
+emulation fallback is acceptable. Useful overrides include:
+
+```bash
+OMARCHY_IMAGE_NAME=omarchy-latest \
+  OMARCHY_IMAGE_VISIBILITY=private \
+  OMARCHY_DISK_SIZE=64G \
+  make openstack-omarchy-image
+```
+
+The nested disk must be at least 32G for Omarchy.
+
+The default LXC network is `lxdbr0`; override it with
+`OMARCHY_LXC_NETWORK` when using a different managed LXD network. The builder
+uses the official `ubuntu:24.04` LXD VM image by default; override it with
+`OMARCHY_LXC_IMAGE_SOURCE` for a local or mirrored image.
+
+Use `make openstack-omarchy-image OMARCHY_ARGS=--no-upload` to retain a local
+artifact for inspection. Set `OMARCHY_KEEP_ARTIFACTS=1` to preserve the build
+directory during an uploaded build, or use `--keep-builder` to retain the
+temporary LXC VM.
+
 ---
 
 ## Inventory and variables
