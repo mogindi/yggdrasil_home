@@ -258,7 +258,7 @@ new file mode 100644
 +zaqar_api_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
 +zaqar_api_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
 +zaqar_api_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
-+zaqar_api_healthcheck_test: ["CMD-SHELL", "healthcheck_listen zaqar-api {{ zaqar_api_port }}"]
++zaqar_api_healthcheck_test: ["CMD-SHELL", "healthcheck_curl http://{{ api_interface_address | put_address_in_context('url') }}:{{ zaqar_api_port }}"]
 +zaqar_api_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
 +zaqar_api_healthcheck:
 +  interval: "{{ zaqar_api_healthcheck_interval }}"
