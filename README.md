@@ -365,6 +365,10 @@ Below is a complete catalog of Make targets in this repo.
 - `openstack-cinder-backup-test` — creates temporary volumes and backups to
   verify the RadosGW-backed Cinder full, incremental, restore, and
   create-from-backup workflows, then removes them.
+- `openstack-freezer-test` — verifies the Keystone `backup` service and
+  endpoint, the `freezer` CLI, and the Freezer v2 API.
+- `scripts/openstack/install-freezer-agent.sh` — installs the release-pinned
+  Freezer agent and scheduler into a self-managed virtual environment.
 - `symlink-etc-kolla` — symlinks `workspace/etc/kolla/*` into `/etc/kolla/`.
 - `openstack-octavia` — initializes Octavia resources.
 - `openstack-rgw` — initializes RGW resources and configures Cinder's S3
@@ -402,6 +406,57 @@ Below is a complete catalog of Make targets in this repo.
   deployment has different capacity. Use `TROVE_MONGODB_TEST_SCOPE=replica`
   or `sharding` for focused runs; the default scope is `all`.
 - `openstack-remove-test-resources` — removes test resources.
+
+### File-level backups with Freezer
+
+Freezer is enabled by `scripts/kolla-ansible/configure.sh` and deployed as a
+custom Kolla extension. The extension keeps the OpenStack 2025.2 release,
+builds local `freezer-api` and `freezer-scheduler` images, and installs
+Freezer 17.0.0. `kolla-ansible-freezer.patch` is applied automatically when
+the Kolla-Ansible checkout is installed; it adds the API, scheduler,
+inventory, load-balancer, logging, database, and password integration.
+
+Agents are intentionally self-managed. On every host whose files need to be
+protected, install the agent and provide a project-scoped credential:
+
+```bash
+sudo OPENSTACK_RELEASE=2025.2 \
+  scripts/openstack/install-freezer-agent.sh
+
+export OS_AUTH_URL=https://keystone.example/v3
+export OS_PROJECT_ID=<project-id>
+export OS_APPLICATION_CREDENTIAL_ID=<application-credential-id>
+export OS_APPLICATION_CREDENTIAL_SECRET=<application-credential-secret>
+export OS_ENDPOINT_TYPE=internal
+export OS_BACKUP_API_VERSION=2
+
+/opt/freezer-agent/bin/freezer-scheduler \
+  --client-id "${OS_PROJECT_ID}_$(hostname -s)" \
+  --interval 60 start
+```
+
+Create the application credential with only the roles required by the
+deployment's Freezer policy, keep its secret on the agent host, and register
+the resulting client ID in the Skyline **Storage → File Backups** page. The
+page supports filesystem, MySQL, MongoDB, and SQL Server sources; Swift, S3,
+SSH/SFTP, FTP, FTPS, and local targets; tar/rsync engines; scheduled jobs;
+and a 30-day retention action by default. Database configuration files and
+all source paths are read on the agent host.
+
+For non-Swift targets, keep credentials on the agent host rather than in the
+Freezer API. The wrapper accepts `FREEZER_ACCESS_KEY`, `FREEZER_SECRET_KEY`,
+and `FREEZER_ENDPOINT` for S3; `FREEZER_SSH_HOST`, `FREEZER_SSH_USERNAME`,
+`FREEZER_SSH_KEY` or `FREEZER_SSH_PASSWORD`, and `FREEZER_SSH_PORT` for SSH;
+and corresponding `FREEZER_FTP_*` values for FTP/FTPS. These variables are
+intended for a root-owned service environment file and are never sent to the
+console or stored in a Freezer job.
+
+The Kolla scheduler is client-scoped and advertises the deployment allowlist
+(`local,swift,ssh,s3,ftp,ftps`, filesystem/database modes, and safe engines).
+Self-managed agents may use the same backends when their local credentials
+and policy permit them. Stored-byte quota and billing are measured by the
+cloud's normal object-storage accounting; Freezer itself does not provide a
+native quota meter.
 
 ### Bundles / orchestrated targets
 

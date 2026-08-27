@@ -92,6 +92,8 @@ set_global_config enable_ceilometer yes
 set_global_config enable_central_logging yes  # takes lots of resources
 set_global_config enable_cloudkitty yes  # deployment broken - something about no cloudkitty database found
 set_global_config enable_designate yes
+# Freezer is enabled through the release-pinned Kolla extension applied by
+# scripts/kolla-ansible/install.sh. Agents remain self-managed on tenant hosts.
 set_global_config enable_freezer yes
 set_global_config enable_gnocchi yes
 set_global_config enable_grafana yes
@@ -319,6 +321,7 @@ cat >  etc/kolla/config/skyline/skyline.yaml <<EOF
 openstack:
   service_mapping:
     alarming: aodh
+    backup: freezer
     metric: gnocchi
     volumev3: cinder
 EOF

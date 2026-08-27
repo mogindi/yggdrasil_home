@@ -1,0 +1,18 @@
+ARG FREEZER_IMAGE_TAG=2025.2-ubuntu-noble
+FROM freezer-base:${FREEZER_IMAGE_TAG}
+
+ARG FREEZER_VERSION=17.0.0
+ARG FREEZER_PIP_INDEX_URL=https://pypi.org/simple
+ARG FREEZER_PIP_EXTRA_INDEX_URL=
+
+RUN PIP_INDEX_URL="${FREEZER_PIP_INDEX_URL}" \
+    PIP_EXTRA_INDEX_URL="${FREEZER_PIP_EXTRA_INDEX_URL}" \
+    /var/lib/kolla/venv/bin/pip install --no-cache-dir \
+        -c /requirements/upper-constraints.txt \
+        freezer-api==${FREEZER_VERSION}
+
+COPY freezer-paste.ini /etc/freezer/freezer-paste.ini
+COPY extend_start_api.sh /usr/local/bin/kolla_freezer_extend_start
+
+RUN chmod 0755 /usr/local/bin/kolla_freezer_extend_start \
+    && chmod 0644 /etc/freezer/freezer-paste.ini

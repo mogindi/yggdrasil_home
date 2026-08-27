@@ -8,6 +8,35 @@
       set_fact:
         image_version: "{{ openstack_release }}-ubuntu-{% if (openstack_release|string) == '2025.2' %}noble{% else %}jammy{% endif %}"
 
+    - name: Build Freezer control-plane images
+      shell: |
+        set -euo pipefail
+        docker pull quay.io/openstack.kolla/openstack-base:{{ image_version }}
+        docker build --network host \
+          --build-arg BASE_IMAGE=quay.io/openstack.kolla/openstack-base:{{ image_version }} \
+          --build-arg FREEZER_VERSION=17.0.0 \
+          --build-arg FREEZER_PIP_INDEX_URL="${FREEZER_PIP_INDEX_URL:-https://pypi.org/simple}" \
+          --build-arg FREEZER_PIP_EXTRA_INDEX_URL="${FREEZER_PIP_EXTRA_INDEX_URL:-}" \
+          --tag freezer-base:{{ image_version }} \
+          --file {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images/Dockerfile.base \
+          {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images
+        docker build --network host \
+          --build-arg FREEZER_IMAGE_TAG={{ image_version }} \
+          --build-arg FREEZER_VERSION=17.0.0 \
+          --build-arg FREEZER_PIP_INDEX_URL="${FREEZER_PIP_INDEX_URL:-https://pypi.org/simple}" \
+          --build-arg FREEZER_PIP_EXTRA_INDEX_URL="${FREEZER_PIP_EXTRA_INDEX_URL:-}" \
+          --tag quay.io/openstack.kolla/freezer-api:{{ image_version }} \
+          --file {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images/Dockerfile.api \
+          {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images
+        docker build --network host \
+          --build-arg FREEZER_IMAGE_TAG={{ image_version }} \
+          --tag quay.io/openstack.kolla/freezer-scheduler:{{ image_version }} \
+          --file {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images/Dockerfile.scheduler \
+          {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images
+      args:
+        executable: /bin/bash
+      when: (openstack_release|string) == '2025.2'
+
     - name: Set images fact
       set_fact:
         images:
@@ -34,10 +63,6 @@
               apt-get -y install python3-dev default-libmysqlclient-dev build-essential pkg-config
               . /var/lib/kolla/venv/bin/activate
               pip install mysqlclient
- #         - image: quay.io/openstack.kolla/freezer-scheduler:{{ image_version }}
- #           custom_cmds: |
- #             mkdir -p /etc/freezer/scheduler
- #             chown freezer:freezer /etc/freezer/scheduler
           - image: quay.io/openstack.kolla/cloudkitty-processor:{{ image_version }}
             custom_files:
               - src: scripts/kolla-ansible/cloudkitty-metrics.yml

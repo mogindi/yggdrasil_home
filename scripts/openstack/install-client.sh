@@ -29,4 +29,5 @@ pip install -U -c https://releases.openstack.org/constraints/upper/$OPENSTACK_RE
   python-solumclient \
   python-zunclient \
   python-octaviaclient \
-  python-barbicanclient
+  python-barbicanclient \
+  python-freezerclient==6.1.0

@@ -1,0 +1,34 @@
+ARG BASE_IMAGE=quay.io/openstack.kolla/openstack-base:2025.2-ubuntu-noble
+FROM ${BASE_IMAGE}
+
+ARG FREEZER_VERSION=17.0.0
+ARG FREEZER_PIP_INDEX_URL=https://pypi.org/simple
+ARG FREEZER_PIP_EXTRA_INDEX_URL=
+
+ENV PATH=/usr/local/bin:/var/lib/kolla/venv/bin:$PATH
+ENV PIP_INDEX_URL=
+ENV PIP_EXTRA_INDEX_URL=
+
+# The 2025.2 openstack-base image already carries the service account in the
+# Kolla UID range.  Keep this fallback so the image remains usable with a
+# locally rebuilt base image.
+RUN if ! getent group freezer >/dev/null; then groupadd --gid 42414 freezer; fi \
+    && if ! getent passwd freezer >/dev/null; then \
+        useradd -l -M --shell /usr/sbin/nologin --uid 42414 --gid freezer freezer; \
+    fi \
+    && usermod --append --groups kolla freezer \
+    && mkdir -p /home/freezer /var/lib/freezer /etc/freezer \
+    && chown -R freezer:freezer /home/freezer /var/lib/freezer
+
+RUN PIP_INDEX_URL="${FREEZER_PIP_INDEX_URL}" \
+    PIP_EXTRA_INDEX_URL="${FREEZER_PIP_EXTRA_INDEX_URL}" \
+    /var/lib/kolla/venv/bin/pip install --no-cache-dir \
+        -c /requirements/upper-constraints.txt \
+        freezer==${FREEZER_VERSION}
+
+COPY extend_start_base.sh /usr/local/bin/kolla_extend_start
+COPY freezer_agent.py /usr/local/bin/freezer-agent
+
+RUN chmod 0755 /usr/local/bin/kolla_extend_start \
+    && chmod 0755 /usr/local/bin/freezer-agent \
+    && chmod 0644 /usr/local/bin/kolla_extend_start

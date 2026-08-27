@@ -20,12 +20,26 @@ git clone --branch $BRANCH https://github.com/openstack/kolla-ansible.git
 # apply patch and setup
 cd kolla-ansible
 if [[ -s ../../kolla-ansible.patch ]]; then
-  git apply --reject --whitespace=fix < <(
+  git apply --check --whitespace=fix < <(
     sed '/^diff --git a\/ansible\/library/,$d' ../../kolla-ansible.patch
   )
-  git apply --reject --unidiff-zero --whitespace=fix < <(
+  git apply --whitespace=fix < <(
+    sed '/^diff --git a\/ansible\/library/,$d' ../../kolla-ansible.patch
+  )
+  git apply --check --unidiff-zero --whitespace=fix < <(
     sed -n '/^diff --git a\/ansible\/library/,$p' ../../kolla-ansible.patch
   )
+  git apply --unidiff-zero --whitespace=fix < <(
+    sed -n '/^diff --git a\/ansible\/library/,$p' ../../kolla-ansible.patch
+  )
+fi
+if [[ -s ../../kolla-ansible-freezer.patch ]]; then
+  git apply --check --whitespace=fix ../../kolla-ansible-freezer.patch
+  git apply --whitespace=fix ../../kolla-ansible-freezer.patch
+fi
+if [[ -s ../../kolla-ansible-freezer-runtime.patch ]]; then
+  git apply --check --whitespace=fix ../../kolla-ansible-freezer-runtime.patch
+  git apply --whitespace=fix ../../kolla-ansible-freezer-runtime.patch
 fi
 python3 setup.py develop
 cd ..

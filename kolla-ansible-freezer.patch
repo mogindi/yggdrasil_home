@@ -1,0 +1,1020 @@
+diff --git a/ansible/group_vars/all/freezer.yml b/ansible/group_vars/all/freezer.yml
+new file mode 100644
+index 0000000..daf7aa6
+--- /dev/null
++++ b/ansible/group_vars/all/freezer.yml
+@@ -0,0 +1,18 @@
++---
++enable_freezer: "no"
++
++########################
++# Freezer API endpoints
++########################
++freezer_internal_fqdn: "{{ kolla_internal_fqdn }}"
++freezer_external_fqdn: "{{ kolla_external_fqdn }}"
++freezer_internal_endpoint: "{{ freezer_internal_fqdn | kolla_url(internal_protocol, freezer_api_port) }}"
++freezer_public_endpoint: "{{ freezer_external_fqdn | kolla_url(public_protocol, freezer_api_public_port) }}"
++freezer_api_port: "9090"
++freezer_api_public_port: "{{ haproxy_single_external_frontend_public_port if haproxy_single_external_frontend | bool else freezer_api_port }}"
++freezer_api_listen_port: "{{ freezer_api_port }}"
++freezer_use_local_images: true
++freezer_supported_actions: "backup,restore,info,admin"
++freezer_supported_modes: "fs,mongo,mysql,sqlserver"
++freezer_supported_storages: "local,swift,ssh,s3,ftp,ftps"
++freezer_supported_engines: "tar,rsync,rsyncv2"
+diff --git a/ansible/inventory/all-in-one b/ansible/inventory/all-in-one
+index e4b5fb4..c9868bf 100644
+--- a/ansible/inventory/all-in-one
++++ b/ansible/inventory/all-in-one
+@@ -89,6 +89,9 @@ control
+ [cloudkitty:children]
+ control
+ 
++[freezer:children]
++control
++
+ [memcached:children]
+ control
+ 
+@@ -292,6 +295,13 @@ cloudkitty
+ [cloudkitty-processor:children]
+ cloudkitty
+ 
++# Freezer
++[freezer-api:children]
++freezer
++
++[freezer-scheduler:children]
++freezer
++
+ # iSCSI
+ [iscsid:children]
+ compute
+diff --git a/ansible/inventory/multinode b/ansible/inventory/multinode
+index 3a3db6f..61ea350 100644
+--- a/ansible/inventory/multinode
++++ b/ansible/inventory/multinode
+@@ -113,6 +113,9 @@ control
+ [cloudkitty:children]
+ control
+ 
++[freezer:children]
++control
++
+ [memcached:children]
+ control
+ 
+@@ -310,6 +313,13 @@ cloudkitty
+ [cloudkitty-processor:children]
+ cloudkitty
+ 
++# Freezer
++[freezer-api:children]
++freezer
++
++[freezer-scheduler:children]
++freezer
++
+ # iSCSI
+ [iscsid:children]
+ compute
+diff --git a/ansible/roles/cron/tasks/config.yml b/ansible/roles/cron/tasks/config.yml
+index d90187d..de0ba6c 100644
+--- a/ansible/roles/cron/tasks/config.yml
++++ b/ansible/roles/cron/tasks/config.yml
+@@ -39,6 +39,7 @@
+       - { name: "ceilometer", enabled: "{{ enable_ceilometer | bool }}" }
+       - { name: "cinder", enabled: "{{ enable_cinder | bool }}" }
+       - { name: "cloudkitty", enabled: "{{ enable_cloudkitty | bool }}" }
++      - { name: "freezer", enabled: "{{ enable_freezer | bool }}" }
+       - { name: "collectd", enabled: "{{ enable_collectd | bool }}" }
+       - { name: "cyborg", enabled: "{{ enable_cyborg | bool }}" }
+       - { name: "designate", enabled: "{{ enable_designate | bool }}" }
+diff --git a/ansible/roles/cron/templates/cron-logrotate-freezer.conf.j2 b/ansible/roles/cron/templates/cron-logrotate-freezer.conf.j2
+new file mode 100644
+index 0000000..c1e1a15
+--- /dev/null
++++ b/ansible/roles/cron/templates/cron-logrotate-freezer.conf.j2
+@@ -0,0 +1 @@
++"/var/log/kolla/freezer/*.log"
+diff --git a/ansible/roles/fluentd/defaults/main.yml b/ansible/roles/fluentd/defaults/main.yml
+index dfbe2d6..061ea2b 100644
+--- a/ansible/roles/fluentd/defaults/main.yml
++++ b/ansible/roles/fluentd/defaults/main.yml
+@@ -94,6 +94,8 @@ fluentd_input_openstack_services:
+     enabled: "{{ enable_cinder | bool }}"
+   - name: cloudkitty
+     enabled: "{{ enable_cloudkitty | bool }}"
++  - name: freezer
++    enabled: "{{ enable_freezer | bool }}"
+   - name: cyborg
+     enabled: "{{ enable_cyborg | bool }}"
+   - name: designate
+diff --git a/ansible/roles/freezer/defaults/main.yml b/ansible/roles/freezer/defaults/main.yml
+new file mode 100644
+index 0000000..95268fa
+--- /dev/null
++++ b/ansible/roles/freezer/defaults/main.yml
+@@ -0,0 +1,168 @@
++---
++freezer_services:
++  freezer-api:
++    container_name: freezer_api
++    group: freezer-api
++    enabled: true
++    image: "{{ freezer_api_image_full }}"
++    volumes: "{{ freezer_api_default_volumes + freezer_api_extra_volumes }}"
++    dimensions: "{{ freezer_api_dimensions }}"
++    healthcheck: "{{ freezer_api_healthcheck }}"
++    haproxy:
++      freezer_api:
++        enabled: "{{ enable_freezer }}"
++        mode: "http"
++        external: false
++        port: "{{ freezer_api_port }}"
++        listen_port: "{{ freezer_api_listen_port }}"
++        backend_http_extra:
++          - "option httpchk GET /healthcheck"
++      freezer_api_external:
++        enabled: "{{ enable_freezer }}"
++        mode: "http"
++        external: true
++        external_fqdn: "{{ freezer_external_fqdn }}"
++        port: "{{ freezer_api_public_port }}"
++        listen_port: "{{ freezer_api_listen_port }}"
++        backend_http_extra:
++          - "option httpchk GET /healthcheck"
++  freezer-scheduler:
++    container_name: freezer_scheduler
++    group: freezer-scheduler
++    enabled: true
++    image: "{{ freezer_scheduler_image_full }}"
++    volumes: "{{ freezer_scheduler_default_volumes + freezer_scheduler_extra_volumes }}"
++    dimensions: "{{ freezer_scheduler_dimensions }}"
++    healthcheck: "{{ freezer_scheduler_healthcheck }}"
++
++####################
++# Config Validate
++####################
++freezer_config_validation: []
++
++####################
++## Database
++#####################
++freezer_database_backend: "sqlalchemy"
++freezer_database_name: "freezer"
++freezer_database_user: "{% if use_preconfigured_databases | bool and use_common_mariadb_user | bool %}{{ database_user }}{% else %}freezer{% endif %}"
++freezer_database_address: "{{ database_address | put_address_in_context('url') }}:{{ database_port }}"
++freezer_elasticsearch_replicas: "1"
++freezer_es_protocol: "{{ internal_protocol }}"
++freezer_es_address: "{{ opensearch_address }}"
++freezer_es_port: "{{ opensearch_port }}"
++
++####################
++# Database sharding
++####################
++freezer_database_shard_root_user: "{% if enable_proxysql | bool %}root_shard_{{ freezer_database_shard_id }}{% else %}{{ database_user }}{% endif %}"
++freezer_database_shard_id: "{{ mariadb_default_database_shard_id | int }}"
++freezer_database_shard:
++  users:
++    - user: "{{ freezer_database_user }}"
++      password: "{{ freezer_database_password }}"
++  rules:
++    - schema: "{{ freezer_database_name }}"
++      shard_id: "{{ freezer_database_shard_id }}"
++
++
++####################
++# Docker
++####################
++freezer_tag: "{{ openstack_tag }}"
++
++freezer_api_image: "{{ docker_image_url }}freezer-api"
++freezer_api_tag: "{{ freezer_tag }}"
++freezer_api_image_full: "{{ freezer_api_image }}:{{ freezer_api_tag }}"
++
++freezer_scheduler_image: "{{ docker_image_url }}freezer-scheduler"
++freezer_scheduler_tag: "{{ freezer_tag }}"
++freezer_scheduler_image_full: "{{ freezer_scheduler_image }}:{{ freezer_scheduler_tag }}"
++
++freezer_api_dimensions: "{{ default_container_dimensions }}"
++freezer_scheduler_dimensions: "{{ default_container_dimensions }}"
++
++freezer_api_enable_healthchecks: "{{ enable_container_healthchecks }}"
++freezer_api_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
++freezer_api_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
++freezer_api_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
++freezer_api_healthcheck_test: ["CMD-SHELL", "healthcheck_curl http://{{ api_interface_address | put_address_in_context('url') }}:{{ freezer_api_port }}/healthcheck"]
++freezer_api_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
++freezer_api_healthcheck:
++  interval: "{{ freezer_api_healthcheck_interval }}"
++  retries: "{{ freezer_api_healthcheck_retries }}"
++  start_period: "{{ freezer_api_healthcheck_start_period }}"
++  test: "{% if freezer_api_enable_healthchecks | bool %}{{ freezer_api_healthcheck_test }}{% else %}NONE{% endif %}"
++  timeout: "{{ freezer_api_healthcheck_timeout }}"
++
++freezer_scheduler_enable_healthchecks: "{{ enable_container_healthchecks }}"
++freezer_scheduler_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
++freezer_scheduler_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
++freezer_scheduler_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
++freezer_scheduler_healthcheck_test: ["CMD-SHELL", "test -n \"$(pgrep -f 'freezer-scheduler')\""]
++freezer_scheduler_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
++freezer_scheduler_healthcheck:
++  interval: "{{ freezer_scheduler_healthcheck_interval }}"
++  retries: "{{ freezer_scheduler_healthcheck_retries }}"
++  start_period: "{{ freezer_scheduler_healthcheck_start_period }}"
++  test: "{% if freezer_scheduler_enable_healthchecks | bool %}{{ freezer_scheduler_healthcheck_test }}{% else %}NONE{% endif %}"
++  timeout: "{{ freezer_scheduler_healthcheck_timeout }}"
++
++freezer_api_default_volumes:
++  - "{{ node_config_directory }}/freezer-api/:{{ container_config_directory }}/:ro"
++  - "/etc/localtime:/etc/localtime:ro"
++  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
++  - "freezer:/var/lib/freezer/"
++  - "kolla_logs:/var/log/kolla/"
++  - "{{ kolla_dev_repos_directory ~ '/freezer-api/freezer_api:/var/lib/kolla/venv/lib/python' ~ distro_python_version ~ '/site-packages/freezer_api' if freezer_dev_mode | bool else '' }}"
++freezer_scheduler_default_volumes:
++  - "{{ node_config_directory }}/freezer-scheduler/:{{ container_config_directory }}/:ro"
++  - "/etc/localtime:/etc/localtime:ro"
++  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
++  - "freezer:/var/lib/freezer/"
++  - "kolla_logs:/var/log/kolla/"
++  - "{{ kolla_dev_repos_directory ~ '/freezer/freezer:/var/lib/kolla/venv/lib/python' ~ distro_python_version ~ '/site-packages/freezer' if freezer_dev_mode | bool else '' }}"
++
++freezer_extra_volumes: "{{ default_extra_volumes }}"
++freezer_api_extra_volumes: "{{ freezer_extra_volumes }}"
++freezer_scheduler_extra_volumes: "{{ freezer_extra_volumes }}"
++
++####################
++# OpenStack
++####################
++freezer_internal_endpoint: "{{ freezer_internal_fqdn | kolla_url(internal_protocol, freezer_api_port) }}"
++freezer_public_endpoint: "{{ freezer_external_fqdn | kolla_url(public_protocol, freezer_api_public_port) }}"
++
++freezer_logging_debug: "{{ openstack_logging_debug }}"
++
++freezer_keystone_user: "freezer"
++
++openstack_freezer_auth: "{{ openstack_auth }}"
++
++freezer_api_workers: "{{ openstack_service_workers }}"
++
++####################
++# Kolla
++####################
++freezer_git_repository: "{{ kolla_dev_repos_git }}/{{ project_name }}"
++freezer_api_git_repository: "{{ kolla_dev_repos_git }}/freezer-api"
++freezer_dev_repos_pull: "{{ kolla_dev_repos_pull }}"
++freezer_dev_mode: "{{ kolla_dev_mode }}"
++freezer_source_version: "{{ kolla_source_version }}"
++
++####################
++# Keystone
++####################
++freezer_ks_services:
++  - name: "freezer"
++    type: "backup"
++    description: "Openstack Freezer Backup Service"
++    endpoints:
++      - {'interface': 'internal', 'url': '{{ freezer_internal_endpoint }}'}
++      - {'interface': 'public', 'url': '{{ freezer_public_endpoint }}'}
++
++freezer_ks_users:
++  - project: "service"
++    user: "{{ freezer_keystone_user }}"
++    password: "{{ freezer_keystone_password }}"
++    role: "admin"
+diff --git a/ansible/roles/freezer/handlers/main.yml b/ansible/roles/freezer/handlers/main.yml
+new file mode 100644
+index 0000000..db58ba7
+--- /dev/null
++++ b/ansible/roles/freezer/handlers/main.yml
+@@ -0,0 +1,32 @@
++---
++- name: Restart freezer-api container
++  vars:
++    service_name: "freezer-api"
++    service: "{{ freezer_services[service_name] }}"
++  become: true
++  kolla_container:
++    action: "recreate_or_restart_container"
++    common_options: "{{ docker_common_options }}"
++    name: "{{ service.container_name }}"
++    image: "{{ service.image }}"
++    volumes: "{{ service.volumes }}"
++    dimensions: "{{ service.dimensions }}"
++    healthcheck: "{{ service.healthcheck | default(omit) }}"
++  when:
++    - kolla_action != "config"
++
++- name: Restart freezer-scheduler container
++  vars:
++    service_name: "freezer-scheduler"
++    service: "{{ freezer_services[service_name] }}"
++  become: true
++  kolla_container:
++    action: "recreate_or_restart_container"
++    common_options: "{{ docker_common_options }}"
++    name: "{{ service.container_name }}"
++    image: "{{ service.image }}"
++    volumes: "{{ service.volumes | reject('equalto', '') | list }}"
++    dimensions: "{{ service.dimensions }}"
++    healthcheck: "{{ service.healthcheck | default(omit) }}"
++  when:
++    - kolla_action != "config"
+diff --git a/ansible/roles/freezer/tasks/bootstrap.yml b/ansible/roles/freezer/tasks/bootstrap.yml
+new file mode 100644
+index 0000000..d04b474
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/bootstrap.yml
+@@ -0,0 +1,40 @@
++---
++- name: Creating Freezer database
++  kolla_toolbox:
++    container_engine: "{{ kolla_container_engine }}"
++    module_name: mysql_db
++    module_args:
++      login_host: "{{ database_address }}"
++      login_port: "{{ database_port }}"
++      login_user: "{{ freezer_database_shard_root_user }}"
++      login_password: "{{ database_password }}"
++      name: "{{ freezer_database_name }}"
++  become: true
++  run_once: True
++  delegate_to: "{{ groups['freezer-api'][0] }}"
++  when:
++    - freezer_database_backend == 'sqlalchemy'
++    - not use_preconfigured_databases | bool
++
++- name: Creating Freezer database user and setting permissions
++  kolla_toolbox:
++    container_engine: "{{ kolla_container_engine }}"
++    module_name: mysql_user
++    module_args:
++      login_host: "{{ database_address }}"
++      login_port: "{{ database_port }}"
++      login_user: "{{ freezer_database_shard_root_user }}"
++      login_password: "{{ database_password }}"
++      name: "{{ freezer_database_user }}"
++      password: "{{ freezer_database_password }}"
++      host: "%"
++      priv: "{{ freezer_database_name }}.*:ALL"
++      append_privs: "yes"
++  become: true
++  run_once: True
++  delegate_to: "{{ groups['freezer-api'][0] }}"
++  when:
++    - freezer_database_backend == 'sqlalchemy'
++    - not use_preconfigured_databases | bool
++
++- import_tasks: bootstrap_service.yml
+diff --git a/ansible/roles/freezer/tasks/bootstrap_service.yml b/ansible/roles/freezer/tasks/bootstrap_service.yml
+new file mode 100644
+index 0000000..ee471e5
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/bootstrap_service.yml
+@@ -0,0 +1,20 @@
++---
++- name: Running Freezer bootstrap container
++  vars:
++    freezer_api: "{{ freezer_services['freezer-api'] }}"
++  become: true
++  kolla_container:
++    action: "start_container"
++    common_options: "{{ docker_common_options }}"
++    detach: False
++    environment:
++      KOLLA_BOOTSTRAP:
++      KOLLA_CONFIG_STRATEGY: "{{ config_strategy }}"
++    image: "{{ freezer_api.image }}"
++    labels:
++      BOOTSTRAP:
++    name: "bootstrap_freezer"
++    restart_policy: oneshot
++    volumes: "{{ freezer_api.volumes | reject('equalto', '') | list }}"
++  run_once: True
++  delegate_to: "{{ groups[freezer_api.group][0] }}"
+diff --git a/ansible/roles/freezer/tasks/check-containers.yml b/ansible/roles/freezer/tasks/check-containers.yml
+new file mode 100644
+index 0000000..f1b6595
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/check-containers.yml
+@@ -0,0 +1,17 @@
++---
++- name: Check freezer containers
++  become: true
++  kolla_container:
++    action: "compare_container"
++    common_options: "{{ docker_common_options }}"
++    name: "{{ item.value.container_name }}"
++    image: "{{ item.value.image }}"
++    volumes: "{{ item.value.volumes | reject('equalto', '') | list }}"
++    dimensions: "{{ item.value.dimensions }}"
++    healthcheck: "{{ item.value.healthcheck | default(omit) }}"
++  when:
++    - inventory_hostname in groups[item.value.group]
++    - item.value.enabled | bool
++  with_dict: "{{ freezer_services }}"
++  notify:
++    - "Restart {{ item.key }} container"
+diff --git a/ansible/roles/freezer/tasks/check.yml b/ansible/roles/freezer/tasks/check.yml
+new file mode 100644
+index 0000000..ed97d53
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/check.yml
+@@ -0,0 +1 @@
++---
+diff --git a/ansible/roles/freezer/tasks/clone.yml b/ansible/roles/freezer/tasks/clone.yml
+new file mode 100644
+index 0000000..faa3375
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/clone.yml
+@@ -0,0 +1,16 @@
++---
++- name: Cloning freezer source repository for development
++  become: true
++  git:
++    repo: "{{ freezer_git_repository }}"
++    dest: "{{ kolla_dev_repos_directory }}/{{ project_name }}"
++    update: "{{ freezer_dev_repos_pull }}"
++    version: "{{ freezer_source_version }}"
++
++- name: Cloning freezer-api source repository for development
++  become: true
++  git:
++    repo: "{{ freezer_api_git_repository }}"
++    dest: "{{ kolla_dev_repos_directory }}/freezer-api"
++    update: "{{ freezer_dev_repos_pull }}"
++    version: "{{ freezer_source_version }}"
+diff --git a/ansible/roles/freezer/tasks/config.yml b/ansible/roles/freezer/tasks/config.yml
+new file mode 100644
+index 0000000..b6f4244
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/config.yml
+@@ -0,0 +1,97 @@
++---
++- name: Ensuring config directories exist
++  file:
++    path: "{{ node_config_directory }}/{{ item.key }}"
++    state: "directory"
++    owner: "{{ config_owner_user }}"
++    group: "{{ config_owner_group }}"
++    mode: "0770"
++  become: true
++  when:
++    - inventory_hostname in groups[item.value.group]
++    - item.value.enabled | bool
++  with_dict: "{{ freezer_services }}"
++
++- name: Check if policies shall be overwritten
++  stat:
++    path: "{{ item }}"
++  delegate_to: localhost
++  run_once: True
++  register: freezer_policy
++  with_first_found:
++    - files: "{{ supported_policy_format_list }}"
++      paths:
++        - "{{ node_custom_config }}/freezer/"
++      skip: true
++
++- name: Set freezer policy file
++  set_fact:
++    freezer_policy_file: "{{ freezer_policy.results.0.stat.path | basename }}"
++    freezer_policy_file_path: "{{ freezer_policy.results.0.stat.path }}"
++  when:
++    - freezer_policy.results
++
++- include_tasks: copy-certs.yml
++  when:
++    - kolla_copy_ca_into_containers | bool
++
++- name: Copying over config.json files for services
++  template:
++    src: "{{ item.key }}.json.j2"
++    dest: "{{ node_config_directory }}/{{ item.key }}/config.json"
++    mode: "0660"
++  become: true
++  when:
++    - inventory_hostname in groups[item.value.group]
++    - item.value.enabled | bool
++  with_dict: "{{ freezer_services }}"
++  notify:
++    - "Restart {{ item.key }} container"
++
++- name: Copying over wsgi-freezer-api.conf
++  vars:
++    service: "{{ freezer_services['freezer-api'] }}"
++  template:
++    src: "wsgi-freezer-api.conf.j2"
++    dest: "{{ node_config_directory }}/freezer-api/wsgi-freezer-api.conf"
++    mode: "0660"
++  become: true
++  when:
++    - inventory_hostname in groups[service.group]
++    - service.enabled | bool
++  notify:
++    - Restart freezer-api container
++
++- name: Copying over freezer confs
++  vars:
++    service_name: "{{ item.key }}"
++  merge_configs:
++    sources:
++      - "{{ role_path }}/templates/freezer.conf.j2"
++      - "{{ node_custom_config }}/global.conf"
++      - "{{ node_custom_config }}/freezer.conf"
++      - "{{ node_custom_config }}/freezer/{{ item.key }}.conf"
++      - "{{ node_custom_config }}/freezer/{{ inventory_hostname }}/{{ item.key }}.conf"
++    dest: "{{ node_config_directory }}/{{ item.key }}/freezer.conf"
++    mode: "0660"
++  become: true
++  when:
++    - inventory_hostname in groups[item.value.group]
++    - item.value.enabled | bool
++  with_dict: "{{ freezer_services }}"
++  notify:
++    - "Restart {{ item.key }} container"
++
++- name: Copying over existing policy file
++  template:
++    src: "{{ freezer_policy_file_path }}"
++    dest: "{{ node_config_directory }}/{{ item.key }}/{{ freezer_policy_file }}"
++    mode: "0660"
++  become: true
++  when:
++    - freezer_policy_file is defined
++    - inventory_hostname in groups[item.value.group]
++    - item.value.enabled | bool
++  with_dict: "{{ freezer_services }}"
++  notify:
++    - "Restart {{ item.key }} container"
+diff --git a/ansible/roles/freezer/tasks/config_validate.yml b/ansible/roles/freezer/tasks/config_validate.yml
+new file mode 100644
+index 0000000..c734493
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/config_validate.yml
+@@ -0,0 +1,7 @@
++---
++- import_role:
++    name: service-config-validate
++  vars:
++    service_config_validate_services: "{{ freezer_services }}"
++    service_name: "{{ project_name }}"
++    service_config_validation: "{{ freezer_config_validation }}"
+diff --git a/ansible/roles/freezer/tasks/copy-certs.yml b/ansible/roles/freezer/tasks/copy-certs.yml
+new file mode 100644
+index 0000000..861d2ed
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/copy-certs.yml
+@@ -0,0 +1,6 @@
++---
++- name: "Copy certificates and keys for {{ project_name }}"
++  import_role:
++    role: service-cert-copy
++  vars:
++    project_services: "{{ freezer_services }}"
+diff --git a/ansible/roles/freezer/tasks/deploy-containers.yml b/ansible/roles/freezer/tasks/deploy-containers.yml
+new file mode 100644
+index 0000000..eb24ab5
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/deploy-containers.yml
+@@ -0,0 +1,2 @@
++---
++- import_tasks: check-containers.yml
+diff --git a/ansible/roles/freezer/tasks/deploy.yml b/ansible/roles/freezer/tasks/deploy.yml
+new file mode 100644
+index 0000000..1073556
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/deploy.yml
+@@ -0,0 +1,14 @@
++---
++- import_tasks: register.yml
++
++- import_tasks: config.yml
++
++- import_tasks: check-containers.yml
++
++- include_tasks: clone.yml
++  when: freezer_dev_mode | bool
++
++- import_tasks: bootstrap.yml
++
++- name: Flush handlers
++  meta: flush_handlers
+diff --git a/ansible/roles/freezer/tasks/loadbalancer.yml b/ansible/roles/freezer/tasks/loadbalancer.yml
+new file mode 100644
+index 0000000..e8bcef0
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/loadbalancer.yml
+@@ -0,0 +1,7 @@
++---
++- name: "Configure loadbalancer for {{ project_name }}"
++  import_role:
++    name: loadbalancer-config
++  vars:
++    project_services: "{{ freezer_services }}"
++  tags: always
+diff --git a/ansible/roles/freezer/tasks/main.yml b/ansible/roles/freezer/tasks/main.yml
+new file mode 100644
+index 0000000..bc5d1e6
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/main.yml
+@@ -0,0 +1,2 @@
++---
++- include_tasks: "{{ kolla_action }}.yml"
+diff --git a/ansible/roles/freezer/tasks/precheck.yml b/ansible/roles/freezer/tasks/precheck.yml
+new file mode 100644
+index 0000000..55a681d
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/precheck.yml
+@@ -0,0 +1,26 @@
++---
++- import_role:
++    name: service-precheck
++  vars:
++    service_precheck_services: "{{ freezer_services }}"
++    service_name: "{{ project_name }}"
++
++- name: Get container facts
++  become: true
++  kolla_container_facts:
++    container_engine: "{{ kolla_container_engine }}"
++    name:
++      - freezer_api
++  check_mode: false
++  register: container_facts
++
++- name: Checking free port for Freezer API
++  wait_for:
++    host: "{{ api_interface_address }}"
++    port: "{{ freezer_api_port }}"
++    connect_timeout: 1
++    timeout: 1
++    state: stopped
++  when:
++    - inventory_hostname in groups[freezer_services['freezer-api']['group']]
++    - container_facts['freezer_api'] is not defined
+diff --git a/ansible/roles/freezer/tasks/pull.yml b/ansible/roles/freezer/tasks/pull.yml
+new file mode 100644
+index 0000000..74911b0
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/pull.yml
+@@ -0,0 +1,4 @@
++---
++- import_role:
++    role: service-images-pull
++  when: not freezer_use_local_images | bool
+diff --git a/ansible/roles/freezer/tasks/reconfigure.yml b/ansible/roles/freezer/tasks/reconfigure.yml
+new file mode 100644
+index 0000000..5b10a7e
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/reconfigure.yml
+@@ -0,0 +1,2 @@
++---
++- import_tasks: deploy.yml
+diff --git a/ansible/roles/freezer/tasks/register.yml b/ansible/roles/freezer/tasks/register.yml
+new file mode 100644
+index 0000000..da9e975
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/register.yml
+@@ -0,0 +1,7 @@
++---
++- import_role:
++    name: service-ks-register
++  vars:
++    service_ks_register_auth: "{{ openstack_freezer_auth }}"
++    service_ks_register_services: "{{ freezer_ks_services }}"
++    service_ks_register_users: "{{ freezer_ks_users }}"
+diff --git a/ansible/roles/freezer/tasks/stop.yml b/ansible/roles/freezer/tasks/stop.yml
+new file mode 100644
+index 0000000..cb39b3d
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/stop.yml
+@@ -0,0 +1,6 @@
++---
++- import_role:
++    name: service-stop
++  vars:
++    project_services: "{{ freezer_services }}"
++    service_name: "{{ project_name }}"
+diff --git a/ansible/roles/freezer/tasks/upgrade.yml b/ansible/roles/freezer/tasks/upgrade.yml
+new file mode 100644
+index 0000000..6ba9f99
+--- /dev/null
++++ b/ansible/roles/freezer/tasks/upgrade.yml
+@@ -0,0 +1,9 @@
++---
++- import_tasks: config.yml
++
++- import_tasks: check-containers.yml
++
++- import_tasks: bootstrap_service.yml
++
++- name: Flush handlers
++  meta: flush_handlers
+diff --git a/ansible/roles/freezer/templates/freezer-api.json.j2 b/ansible/roles/freezer/templates/freezer-api.json.j2
+new file mode 100644
+index 0000000..1c25a9d
+--- /dev/null
++++ b/ansible/roles/freezer/templates/freezer-api.json.j2
+@@ -0,0 +1,38 @@
++{% set apache_cmd = 'apache2' if kolla_base_distro in ['ubuntu', 'debian'] else 'httpd' %}
++{% set apache_dir = 'apache2/conf-enabled' if kolla_base_distro in ['ubuntu', 'debian'] else 'httpd/conf.d' %}
++{
++    "command": "{{ apache_cmd }} -DFOREGROUND",
++    "config_files": [
++        {
++            "source": "{{ container_config_directory }}/freezer.conf",
++            "dest": "/etc/freezer/freezer.conf",
++            "owner": "freezer",
++            "perm": "0600"
++        },
++        {
++            "source": "{{ container_config_directory }}/wsgi-freezer-api.conf",
++            "dest": "/etc/{{ apache_dir }}/wsgi-freezer.conf",
++            "owner": "freezer",
++            "perm": "0600"
++        }{% if freezer_policy_file is defined %},
++        {
++            "source": "{{ container_config_directory }}/{{ freezer_policy_file }}",
++            "dest": "/etc/freezer/{{ freezer_policy_file }}",
++            "owner": "freezer",
++            "perm": "0600"
++        }{% endif %}{% if kolla_copy_ca_into_containers | bool %},
++        {
++            "source": "{{ container_config_directory }}/ca-certificates",
++            "dest": "/var/lib/kolla/share/ca-certificates",
++            "owner": "root",
++            "perm": "0644"
++        }{% endif %}
++    ],
++    "permissions": [
++        {
++            "path": "/var/log/kolla/freezer",
++            "owner": "freezer:freezer",
++            "recurse": true
++        }
++    ]
++}
+diff --git a/ansible/roles/freezer/templates/freezer-scheduler.json.j2 b/ansible/roles/freezer/templates/freezer-scheduler.json.j2
+new file mode 100644
+index 0000000..6b56395
+--- /dev/null
++++ b/ansible/roles/freezer/templates/freezer-scheduler.json.j2
+@@ -0,0 +1,30 @@
++{
++    "command": "kolla-freezer-scheduler --config-file /etc/freezer/freezer.conf --disable-exec start",
++    "config_files": [
++        {
++            "source": "{{ container_config_directory }}/freezer.conf",
++            "dest": "/etc/freezer/freezer.conf",
++            "owner": "freezer",
++            "perm": "0600"
++        }{% if freezer_policy_file is defined %},
++        {
++            "source": "{{ container_config_directory }}/{{ freezer_policy_file }}",
++            "dest": "/etc/freezer/{{ freezer_policy_file }}",
++            "owner": "freezer",
++            "perm": "0600"
++        }{% endif %}{% if kolla_copy_ca_into_containers | bool %},
++        {
++            "source": "{{ container_config_directory }}/ca-certificates",
++            "dest": "/var/lib/kolla/share/ca-certificates",
++            "owner": "root",
++            "perm": "0644"
++        }{% endif %}
++    ],
++    "permissions": [
++        {
++            "path": "/var/log/kolla/freezer",
++            "owner": "freezer:freezer",
++            "recurse": true
++        }
++    ]
++}
+diff --git a/ansible/roles/freezer/templates/freezer.conf.j2 b/ansible/roles/freezer/templates/freezer.conf.j2
+new file mode 100644
+index 0000000..4ca2c81
+--- /dev/null
++++ b/ansible/roles/freezer/templates/freezer.conf.j2
+@@ -0,0 +1,83 @@
++[DEFAULT]
++debug = {{ freezer_logging_debug }}
++
++log_dir = /var/log/kolla/freezer
++
++{% if service_name == 'freezer-api' %}
++enable_v1_api = false
++bind_host = {{ api_interface_address }}
++bind_port = {{ freezer_api_port }}
++{% endif %}
++
++{% if service_name == 'freezer-scheduler' %}
++client_id = {{ inventory_hostname }}
++jobs_dir = /var/lib/freezer/scheduler/conf.d
++
++os_username = {{ freezer_keystone_user }}
++os_password = {{ freezer_keystone_password }}
++os_auth_url = {{ keystone_internal_url }}
++os_endpoint_type = internalURL
++os_project_name = service
++os_project_domain_name = {{ default_project_domain_name }}
++os_user_domain_name = {{ default_user_domain_name }}
++
++[capabilities]
++supported_actions = {{ freezer_supported_actions }}
++supported_modes = {{ freezer_supported_modes }}
++supported_storages = {{ freezer_supported_storages }}
++supported_engines = {{ freezer_supported_engines }}
++{% endif %}
++
++{% if service_name == 'freezer-api' %}
++[keystone_authtoken]
++service_type = backup
++www_authenticate_uri = {{ keystone_internal_url }}
++auth_url = {{ keystone_internal_url }}
++auth_type = password
++project_domain_id = {{ default_project_domain_id }}
++user_domain_id = {{ default_user_domain_id }}
++project_name = service
++username = {{ freezer_keystone_user }}
++password = {{ freezer_keystone_password }}
++cafile = {{ openstack_cacert }}
++region_name = {{ openstack_region_name }}
++
++memcache_security_strategy = ENCRYPT
++memcache_secret_key = {{ memcache_secret_key }}
++memcached_servers = {% for host in groups['memcached'] %}{{ 'api' | kolla_address(host) | put_address_in_context('memcache') }}:{{ memcached_port }}{% if not loop.last %},{% endif %}{% endfor %}
++
++{% if freezer_policy_file is defined %}
++[oslo_policy]
++policy_file = {{ freezer_policy_file }}
++{% endif %}
++
++[oslo_middleware]
++enable_proxy_headers_parsing = True
++
++[paste_deploy]
++config_file = /etc/freezer/freezer-paste.ini
++
++
++{% if freezer_database_backend == 'sqlalchemy' %}
++[storage]
++backend = sqlalchemy
++driver = sqlalchemy
++
++[database]
++connection = mysql+pymysql://{{ freezer_database_user }}:{{ freezer_database_password }}@{{ freezer_database_address }}/{{ freezer_database_name }}
++connection_recycle_time = {{ database_connection_recycle_time }}
++max_pool_size = {{ database_max_pool_size }}
++max_retries = -1
++{% endif %}
++
++{% if freezer_database_backend == 'elasticsearch' %}
++[storage]
++backend = elasticsearch
++driver = elasticsearch
++
++[elasticsearch]
++hosts = {{ freezer_es_protocol }}://{{ freezer_es_address | put_address_in_context('url') }}:{{ freezer_es_port }}
++number_of_replicas = {{ freezer_elasticsearch_replicas }}
++index = freezer
++{% endif %}
++{% endif %}
+diff --git a/ansible/roles/freezer/templates/wsgi-freezer-api.conf.j2 b/ansible/roles/freezer/templates/wsgi-freezer-api.conf.j2
+new file mode 100644
+index 0000000..4cb1db2
+--- /dev/null
++++ b/ansible/roles/freezer/templates/wsgi-freezer-api.conf.j2
+@@ -0,0 +1,38 @@
++{% set freezer_log_dir = '/var/log/kolla/freezer' %}
++{% set python_path = '/var/lib/kolla/venv/lib/python' ~ distro_python_version ~ '/site-packages' %}
++Listen {{ api_interface_address | put_address_in_context('url') }}:{{ freezer_api_port }}
++
++ServerSignature Off
++ServerTokens Prod
++TraceEnable off
++TimeOut {{ kolla_httpd_timeout }}
++KeepAliveTimeout {{ kolla_httpd_keep_alive }}
++
++ErrorLog "{{ freezer_log_dir }}/apache-error.log"
++<IfModule log_config_module>
++    CustomLog "{{ freezer_log_dir }}/apache-access.log" common
++</IfModule>
++
++{% if freezer_logging_debug | bool %}
++LogLevel info
++{% endif %}
++
++<VirtualHost *:{{ freezer_api_port }}>
++    WSGIDaemonProcess freezer-api processes={{ freezer_api_workers }} threads=1 user=freezer group=freezer display-name=freezer-api
++    WSGIProcessGroup freezer-api
++    WSGIApplicationGroup %{GLOBAL}
++    WSGIScriptAlias / {{ python_path }}/freezer_api/cmd/wsgi.py
++
++    ErrorLog {{ freezer_log_dir }}/freezer-api.log
++    LogFormat "%{X-Forwarded-For}i %l %u %t \"%r\" %>s %b %D \"%{Referer}i\" \"%{User-Agent}i\"" logformat
++    CustomLog {{ freezer_log_dir }}/freezer-api_access.log logformat
++
++    <Directory {{ python_path }}/freezer_api>
++      Options Indexes FollowSymLinks MultiViews
++      Require all granted
++      AllowOverride None
++      Order allow,deny
++      allow from all
++      LimitRequestBody 102400
++    </Directory>
++</VirtualHost>
+diff --git a/ansible/roles/freezer/vars/main.yml b/ansible/roles/freezer/vars/main.yml
+new file mode 100644
+index 0000000..20fbc8f
+--- /dev/null
++++ b/ansible/roles/freezer/vars/main.yml
+@@ -0,0 +1,2 @@
++---
++project_name: "freezer"
+diff --git a/ansible/roles/loadbalancer/tasks/precheck.yml b/ansible/roles/loadbalancer/tasks/precheck.yml
+index 7d4fc4b..0554d02 100644
+--- a/ansible/roles/loadbalancer/tasks/precheck.yml
++++ b/ansible/roles/loadbalancer/tasks/precheck.yml
+@@ -318,6 +318,19 @@
+     - haproxy_stat.find('cloudkitty_api') == -1
+     - haproxy_vip_prechecks
+ 
++- name: Checking free port for Freezer API HAProxy
++  wait_for:
++    host: "{{ kolla_internal_vip_address }}"
++    port: "{{ freezer_api_port }}"
++    connect_timeout: 1
++    timeout: 1
++    state: stopped
++  when:
++    - enable_freezer | bool
++    - inventory_hostname in groups['loadbalancer']
++    - haproxy_stat.find('freezer_api') == -1
++    - haproxy_vip_prechecks
++
+ - name: Checking free port for Cyborg API HAProxy
+   wait_for:
+     host: "{{ kolla_internal_vip_address }}"
+diff --git a/ansible/site.yml b/ansible/site.yml
+index 610c4a9..637d8b0 100644
+--- a/ansible/site.yml
++++ b/ansible/site.yml
+@@ -29,6 +29,7 @@
+         - enable_ceph_rgw_{{ enable_ceph_rgw | bool }}
+         - enable_cinder_{{ enable_cinder | bool }}
+         - enable_cloudkitty_{{ enable_cloudkitty | bool }}
++        - enable_freezer_{{ enable_freezer | bool }}
+         - enable_collectd_{{ enable_collectd | bool }}
+         - enable_cyborg_{{ enable_cyborg | bool }}
+         - enable_designate_{{ enable_designate | bool }}
+@@ -176,6 +177,11 @@
+             tasks_from: loadbalancer
+           tags: cloudkitty
+           when: enable_cloudkitty | bool
++        - include_role:
++            name: freezer
++            tasks_from: loadbalancer
++          tags: freezer
++          when: enable_freezer | bool
+         - include_role:
+             name: cyborg
+             tasks_from: loadbalancer
+@@ -981,6 +987,21 @@
+     - { role: cloudkitty,
+         tags: cloudkitty }
+ 
++- name: Apply role freezer
++  gather_facts: false
++  hosts:
++    - freezer-api
++    - freezer-scheduler
++    - '&enable_freezer_True'
++  serial: '{{ kolla_serial|default("0") }}'
++  max_fail_percentage: >-
++    {{ freezer_max_fail_percentage |
++       default(kolla_max_fail_percentage) |
++       default(100) }}
++  roles:
++    - { role: freezer,
++        tags: freezer }
++
+ - name: Apply role tacker
+   gather_facts: false
+   hosts:
+diff --git a/etc/kolla/passwords.yml b/etc/kolla/passwords.yml
+index 1120754..d4980c0 100644
+--- a/etc/kolla/passwords.yml
++++ b/etc/kolla/passwords.yml
+@@ -79,6 +79,9 @@ cinder_keystone_password:
+ cloudkitty_database_password:
+ cloudkitty_keystone_password:
+ 
++freezer_database_password:
++freezer_keystone_password:
++
+ cyborg_database_password:
+ cyborg_keystone_password:
+ 

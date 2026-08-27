@@ -110,6 +110,9 @@ openstack-rgw:
 openstack-cinder-backup-test:
 	scripts/tests/cinder-backup.sh
 
+openstack-freezer-test:
+	scripts/tests/freezer.sh
+
 openstack-magnum:
 #	scripts/tests/magnum.sh
 	ansible-playbook ansible/openstack_initialize/magnum.yml $(ARGS)

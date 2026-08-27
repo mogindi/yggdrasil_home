@@ -1,0 +1,35 @@
+diff --git a/ansible/roles/haproxy-config/tasks/main.yml b/ansible/roles/haproxy-config/tasks/main.yml
+index 3967a434e..c817736da 100644
+--- a/ansible/roles/haproxy-config/tasks/main.yml
++++ b/ansible/roles/haproxy-config/tasks/main.yml
+@@ -13,6 +13,8 @@
+     src: "{{ template_file }}"
+     dest: "{{ node_config_directory }}/haproxy/services.d/{{ item.key }}.cfg"
+     mode: "0660"
++  notify:
++    - Restart haproxy container
+   become: true
+   when:
+     - service.enabled | bool
+diff --git a/ansible/roles/proxysql-config/tasks/main.yml b/ansible/roles/proxysql-config/tasks/main.yml
+index 6e637f30c..f92f68b93 100644
+--- a/ansible/roles/proxysql-config/tasks/main.yml
++++ b/ansible/roles/proxysql-config/tasks/main.yml
+@@ -4,6 +4,8 @@
+     src: "users.yaml.j2"
+     dest: "{{ node_config_directory }}/proxysql/users/{{ proxysql_project }}.yaml"
+     mode: "0660"
++  notify:
++    - Restart proxysql container
+   become: true
+   when:
+     - proxysql_config_users | bool
+@@ -13,6 +15,8 @@
+     src: "rules.yaml.j2"
+     dest: "{{ node_config_directory }}/proxysql/rules/{{ proxysql_project }}.yaml"
+     mode: "0660"
++  notify:
++    - Restart proxysql container
+   become: true
+   when:
+     - proxysql_config_rules | bool

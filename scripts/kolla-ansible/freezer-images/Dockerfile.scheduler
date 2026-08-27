@@ -1,0 +1,9 @@
+ARG FREEZER_IMAGE_TAG=2025.2-ubuntu-noble
+FROM freezer-base:${FREEZER_IMAGE_TAG}
+
+RUN mkdir -p /var/lib/freezer/scheduler/conf.d \
+    && chown -R freezer:freezer /etc/freezer /var/lib/freezer
+COPY freezer_scheduler.py /usr/local/bin/kolla-freezer-scheduler
+RUN chmod 0755 /usr/local/bin/kolla-freezer-scheduler
+
+USER freezer
