@@ -11,6 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${OPENSTACK_ZUN_RAM_ALLOCATION_RATIO:=1.5}"
 : "${OPENSTACK_ZUN_HOST_SHARED_WITH_NOVA:=true}"
 : "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED:=no}"
+: "${OPENSTACK_NETWORK_GUARD_ENABLED:=no}"
 
 is_enabled() {
 	case "${1,,}" in
@@ -81,6 +82,16 @@ set_global_config ceph_cinder_backup_user admin
 set_global_config neutron_plugin_agent ovn
 set_global_config neutron_ovn_dhcp_agent yes
 set_global_config neutron_dns_domain "xyz.local."
+
+# Network guard is deliberately opt-in. Kolla's packet-logging plugin is the
+# low-overhead data-plane signal used by the network-guard detector. Normalize
+# the deployment flag so a later reconfigure with the default value reliably
+# turns packet logging back off.
+network_guard_packet_logging=no
+if is_enabled "$OPENSTACK_NETWORK_GUARD_ENABLED"; then
+	network_guard_packet_logging=yes
+fi
+set_global_config enable_neutron_packet_logging "$network_guard_packet_logging"
 
 set_global_config designate_dnssec_validation no
 set_global_config designate_recursion yes

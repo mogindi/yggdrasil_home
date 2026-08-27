@@ -89,6 +89,7 @@
         OPENSTACK_ZUN_RAM_ALLOCATION_RATIO: "{{ openstack_zun_ram_allocation_ratio | default(1.5) }}"
         OPENSTACK_ZUN_HOST_SHARED_WITH_NOVA: "{{ openstack_zun_host_shared_with_nova | default(true) }}"
         OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED: "{{ function_cloudkitty_enabled | default(false) }}"
+        OPENSTACK_NETWORK_GUARD_ENABLED: "{{ openstack_network_guard_enabled | default(false) | bool }}"
         OPENSTACK_AMPHORA_SUBNET_CIDR: "{{ openstack_amphora_network.cidr }}"
         OPENSTACK_PHYSNET_MTU: "{{ openstack_physnet_mtu | default(1500) }}"
         OPENSTACK_PATH_MTU: "{{ openstack_physnet_mtu | default(1500) }}"

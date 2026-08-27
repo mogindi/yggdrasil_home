@@ -203,6 +203,10 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
 6. **Set OpenStack release and service values**
    In `all.vars`, confirm:
    - `openstack_release`,
+   - `openstack_network_guard_enabled` (default: `false`), which enables the
+     opt-in Neutron packet-logging signal used by the network-guard detector.
+     The flag is safe to toggle on a later Kolla reconfigure; setting it back
+     to `false` disables packet logging again.
    - DNS forwarders (`openstack_designate_forwarders_*`),
    - `openstack_ceph_rgw_hosts` values,
    - the RadosGW Cinder backup settings (`openstack_cinder_backup_s3_*`);
@@ -218,6 +222,16 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
      mode, Zun preserves the Nova/Placement allocation ratios; the
      `openstack_zun_*_allocation_ratio` values apply when Zun uses its own
      provider.
+
+To enable the signal for a deployment, pass the flag during Kolla
+configuration and reconfigure Neutron:
+
+```bash
+make kollaansible-prepare ENV=aio ARGS='-e openstack_network_guard_enabled=true'
+scripts/kolla-ansible/kolla-ansible.sh reconfigure -t neutron
+```
+
+Omit the extra variable, or set it to `false`, to keep packet logging disabled.
 
 7. **Validate inventory before deployment**
 
