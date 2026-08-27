@@ -472,6 +472,30 @@ and policy permit them. Stored-byte quota and billing are measured by the
 cloud's normal object-storage accounting; Freezer itself does not provide a
 native quota meter.
 
+### Messaging with Zaqar
+
+Zaqar is enabled by `scripts/kolla-ansible/configure.sh` and installed as a
+local Kolla extension. The API image is built from the OpenStack 2025.2 Zaqar
+source and runs behind Kolla's HAProxy. Both the message store and management
+store use the existing Kolla Valkey Sentinel cluster. Kolla's Valkey URI is
+Redis-protocol compatible; the extension changes its Sentinel query key from
+`sentinel` to Zaqar's required `master` key.
+
+The normal deployment pipeline builds the image and applies the extension:
+
+```bash
+make kollaansible-images ENV=aio
+make kollaansible-prepare-full ENV=aio
+make kollaansible-deploy ENV=aio
+make openstack-zaqar-test ENV=aio
+```
+
+The Skyline console exposes **Messaging → Queues** after a new login. It can
+create and delete project-scoped queues, inspect queue statistics, publish and
+claim JSON messages, purge queues, and manage HTTP/HTTPS subscriptions. The
+service is registered in Keystone as type `messaging`; the endpoint is the
+normal unversioned service URL and the console uses its `/v2` API.
+
 ### Bundles / orchestrated targets
 
 - `init` — alias for `prepare-ansible`.

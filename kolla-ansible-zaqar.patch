@@ -1,0 +1,659 @@
+diff --git a/ansible/group_vars/all/zaqar.yml b/ansible/group_vars/all/zaqar.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/group_vars/all/zaqar.yml
+@@ -0,0 +1,48 @@
++---
++enable_zaqar: "no"
++
++########################
++# Zaqar API endpoints
++########################
++zaqar_internal_fqdn: "{{ kolla_internal_fqdn }}"
++zaqar_external_fqdn: "{{ kolla_external_fqdn }}"
++zaqar_api_port: "8888"
++zaqar_api_listen_port: "{{ zaqar_api_port }}"
++zaqar_api_public_port: "{{ haproxy_single_external_frontend_public_port if haproxy_single_external_frontend | bool else zaqar_api_port }}"
++zaqar_internal_endpoint: "{{ zaqar_internal_fqdn | kolla_url(internal_protocol, zaqar_api_port) }}"
++zaqar_public_endpoint: "{{ zaqar_external_fqdn | kolla_url(public_protocol, zaqar_api_public_port) }}"
++zaqar_use_local_images: true
++
++########################
++# Zaqar storage
++########################
++# Kolla's Valkey Sentinel URI is Redis-protocol compatible, but Zaqar's
++# Redis driver expects the Sentinel master query key to be named `master`.
++zaqar_valkey_connection_string: "{{ valkey_connection_string | replace('?sentinel=', '?master=') }}"
++
++########################
++# Zaqar API workers
++########################
++zaqar_api_workers: "{{ openstack_service_workers }}"
++zaqar_logging_debug: "{{ openstack_logging_debug }}"
++zaqar_keystone_user: "zaqar"
++openstack_zaqar_auth: "{{ openstack_auth }}"
++zaqar_wsgi_provider: "uwsgi"
++zaqar_copy_certs: "{{ kolla_copy_ca_into_containers | bool }}"
++
++########################
++# Keystone registration
++########################
++zaqar_ks_services:
++  - name: "zaqar"
++    type: "messaging"
++    description: "OpenStack Messaging Service"
++    endpoints:
++      - {'interface': 'internal', 'url': '{{ zaqar_internal_endpoint }}'}
++      - {'interface': 'public', 'url': '{{ zaqar_public_endpoint }}'}
++
++zaqar_ks_users:
++  - project: "service"
++    user: "{{ zaqar_keystone_user }}"
++    password: "{{ zaqar_keystone_password }}"
++    role: "admin"
+diff --git a/ansible/inventory/all-in-one b/ansible/inventory/all-in-one
+--- a/ansible/inventory/all-in-one
++++ b/ansible/inventory/all-in-one
+@@ -91,5 +91,8 @@
+ [freezer:children]
+ control
+ 
++[zaqar:children]
++control
++
+ [memcached:children]
+ control
+@@ -301,6 +304,10 @@
+ [freezer-scheduler:children]
+ freezer
+ 
++# Zaqar
++[zaqar-api:children]
++zaqar
++
+ # iSCSI
+ [iscsid:children]
+ compute
+diff --git a/ansible/inventory/multinode b/ansible/inventory/multinode
+--- a/ansible/inventory/multinode
++++ b/ansible/inventory/multinode
+@@ -115,5 +115,8 @@
+ [freezer:children]
+ control
+ 
++[zaqar:children]
++control
++
+ [memcached:children]
+ control
+@@ -319,6 +322,10 @@
+ [freezer-scheduler:children]
+ freezer
+ 
++# Zaqar
++[zaqar-api:children]
++zaqar
++
+ # iSCSI
+ [iscsid:children]
+ compute
+diff --git a/ansible/roles/cron/tasks/config.yml b/ansible/roles/cron/tasks/config.yml
+--- a/ansible/roles/cron/tasks/config.yml
++++ b/ansible/roles/cron/tasks/config.yml
+@@ -47,6 +47,7 @@
+       - { name: "cinder", enabled: "{{ enable_cinder | bool }}" }
+       - { name: "cloudkitty", enabled: "{{ enable_cloudkitty | bool }}" }
+       - { name: "freezer", enabled: "{{ enable_freezer | bool }}" }
++      - { name: "zaqar", enabled: "{{ enable_zaqar | bool }}" }
+       - { name: "collectd", enabled: "{{ enable_collectd | bool }}" }
+       - { name: "cyborg", enabled: "{{ enable_cyborg | bool }}" }
+       - { name: "designate", enabled: "{{ enable_designate | bool }}" }
+diff --git a/ansible/roles/cron/templates/cron-logrotate-zaqar.conf.j2 b/ansible/roles/cron/templates/cron-logrotate-zaqar.conf.j2
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/cron/templates/cron-logrotate-zaqar.conf.j2
+@@ -0,0 +1 @@
++"/var/log/kolla/zaqar/*.log"
+diff --git a/ansible/roles/fluentd/defaults/main.yml b/ansible/roles/fluentd/defaults/main.yml
+--- a/ansible/roles/fluentd/defaults/main.yml
++++ b/ansible/roles/fluentd/defaults/main.yml
+@@ -102,6 +102,8 @@
+     enabled: "{{ enable_cloudkitty | bool }}"
+   - name: freezer
+     enabled: "{{ enable_freezer | bool }}"
++  - name: zaqar
++    enabled: "{{ enable_zaqar | bool }}"
+   - name: cyborg
+     enabled: "{{ enable_cyborg | bool }}"
+   - name: designate
+diff --git a/ansible/roles/loadbalancer/tasks/precheck.yml b/ansible/roles/loadbalancer/tasks/precheck.yml
+--- a/ansible/roles/loadbalancer/tasks/precheck.yml
++++ b/ansible/roles/loadbalancer/tasks/precheck.yml
+@@ -331,6 +331,19 @@
+     - haproxy_stat.find('freezer_api') == -1
+     - haproxy_vip_prechecks
+ 
++- name: Checking free port for Zaqar API HAProxy
++  wait_for:
++    host: "{{ kolla_internal_vip_address }}"
++    port: "{{ zaqar_api_port }}"
++    connect_timeout: 1
++    timeout: 1
++    state: stopped
++  when:
++    - enable_zaqar | bool
++    - inventory_hostname in groups['loadbalancer']
++    - haproxy_stat.find('zaqar_api') == -1
++    - haproxy_vip_prechecks
++
+ - name: Checking free port for Cyborg API HAProxy
+   wait_for:
+     host: "{{ kolla_internal_vip_address }}"
+diff --git a/ansible/site.yml b/ansible/site.yml
+--- a/ansible/site.yml
++++ b/ansible/site.yml
+@@ -29,6 +29,7 @@
+         - enable_cinder_{{ enable_cinder | bool }}
+         - enable_cloudkitty_{{ enable_cloudkitty | bool }}
+         - enable_freezer_{{ enable_freezer | bool }}
++        - enable_zaqar_{{ enable_zaqar | bool }}
+         - enable_collectd_{{ enable_collectd | bool }}
+         - enable_cyborg_{{ enable_cyborg | bool }}
+         - enable_designate_{{ enable_designate | bool }}
+@@ -183,5 +184,10 @@
+           tags: freezer
+           when: enable_freezer | bool
++        - include_role:
++            name: zaqar
++            tasks_from: loadbalancer
++          tags: zaqar
++          when: enable_zaqar | bool
+         - include_role:
+             name: cyborg
+             tasks_from: loadbalancer
+@@ -1003,6 +1009,20 @@
+     - { role: freezer,
+         tags: freezer }
+ 
++- name: Apply role zaqar
++  gather_facts: false
++  hosts:
++    - zaqar-api
++    - '&enable_zaqar_True'
++  serial: '{{ kolla_serial|default("0") }}'
++  max_fail_percentage: >-
++    {{ zaqar_max_fail_percentage |
++       default(kolla_max_fail_percentage) |
++       default(100) }}
++  roles:
++    - { role: zaqar,
++        tags: zaqar }
++
+ - name: Apply role tacker
+   gather_facts: false
+   hosts:
+diff --git a/etc/kolla/passwords.yml b/etc/kolla/passwords.yml
+--- a/etc/kolla/passwords.yml
++++ b/etc/kolla/passwords.yml
+@@ -81,6 +81,9 @@
+ freezer_database_password:
+ freezer_keystone_password:
+ 
++zaqar_keystone_password:
++zaqar_secret_key:
++
+ cyborg_database_password:
+ cyborg_keystone_password:
+ 
+diff --git a/ansible/roles/zaqar/defaults/main.yml b/ansible/roles/zaqar/defaults/main.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/defaults/main.yml
+@@ -0,0 +1,101 @@
++---
++zaqar_services:
++  zaqar-api:
++    container_name: zaqar_api
++    group: zaqar-api
++    enabled: true
++    image: "{{ zaqar_api_image_full }}"
++    volumes: "{{ zaqar_api_default_volumes + zaqar_api_extra_volumes }}"
++    dimensions: "{{ zaqar_api_dimensions }}"
++    healthcheck: "{{ zaqar_api_healthcheck }}"
++    wsgi: "zaqar.transport.wsgi.app:app"
++    haproxy:
++      zaqar_api:
++        enabled: "{{ enable_zaqar }}"
++        mode: "http"
++        external: false
++        port: "{{ zaqar_api_port }}"
++        listen_port: "{{ zaqar_api_listen_port }}"
++        backend_http_extra:
++          - "option httpchk"
++      zaqar_api_external:
++        enabled: "{{ enable_zaqar }}"
++        mode: "http"
++        external: true
++        external_fqdn: "{{ zaqar_external_fqdn }}"
++        port: "{{ zaqar_api_public_port }}"
++        listen_port: "{{ zaqar_api_listen_port }}"
++        backend_http_extra:
++          - "option httpchk"
++
++####################
++# Config Validate
++####################
++zaqar_config_validation: []
++
++####################
++# Docker
++####################
++zaqar_tag: "{{ openstack_tag }}"
++zaqar_api_image: "{{ docker_image_url }}zaqar"
++zaqar_api_tag: "{{ zaqar_tag }}"
++zaqar_api_image_full: "{{ zaqar_api_image }}:{{ zaqar_api_tag }}"
++zaqar_api_dimensions: "{{ default_container_dimensions }}"
++
++zaqar_api_enable_healthchecks: "{{ enable_container_healthchecks }}"
++zaqar_api_healthcheck_interval: "{{ default_container_healthcheck_interval }}"
++zaqar_api_healthcheck_retries: "{{ default_container_healthcheck_retries }}"
++zaqar_api_healthcheck_start_period: "{{ default_container_healthcheck_start_period }}"
++zaqar_api_healthcheck_test: ["CMD-SHELL", "healthcheck_listen zaqar-api {{ zaqar_api_port }}"]
++zaqar_api_healthcheck_timeout: "{{ default_container_healthcheck_timeout }}"
++zaqar_api_healthcheck:
++  interval: "{{ zaqar_api_healthcheck_interval }}"
++  retries: "{{ zaqar_api_healthcheck_retries }}"
++  start_period: "{{ zaqar_api_healthcheck_start_period }}"
++  test: "{% if zaqar_api_enable_healthchecks | bool %}{{ zaqar_api_healthcheck_test }}{% else %}NONE{% endif %}"
++  timeout: "{{ zaqar_api_healthcheck_timeout }}"
++
++zaqar_api_default_volumes:
++  - "{{ node_config_directory }}/zaqar-api/:{{ container_config_directory }}/:ro"
++  - "/etc/localtime:/etc/localtime:ro"
++  - "{{ '/etc/timezone:/etc/timezone:ro' if ansible_facts.os_family == 'Debian' else '' }}"
++  - "zaqar:/var/lib/zaqar/"
++  - "kolla_logs:/var/log/kolla/"
++  - "/dev/shm:/dev/shm"
++
++zaqar_extra_volumes: "{{ default_extra_volumes }}"
++zaqar_api_extra_volumes: "{{ zaqar_extra_volumes }}"
++
++####################
++# OpenStack
++####################
++zaqar_logging_debug: "{{ openstack_logging_debug }}"
++zaqar_keystone_user: "zaqar"
++openstack_zaqar_auth: "{{ openstack_auth }}"
++zaqar_api_workers: "{{ openstack_service_workers }}"
++zaqar_wsgi_provider: "uwsgi"
++zaqar_copy_certs: "{{ kolla_copy_ca_into_containers | bool }}"
++
++####################
++# Kolla
++####################
++zaqar_dev_mode: "{{ kolla_dev_mode }}"
++zaqar_dev_repos_pull: "{{ kolla_dev_repos_pull }}"
++zaqar_source_version: "{{ kolla_source_version }}"
++
++####################
++# Keystone
++####################
++zaqar_ks_services:
++  - name: "zaqar"
++    type: "messaging"
++    description: "OpenStack Messaging Service"
++    endpoints:
++      - {'interface': 'internal', 'url': '{{ zaqar_internal_endpoint }}'}
++      - {'interface': 'public', 'url': '{{ zaqar_public_endpoint }}'}
++
++zaqar_ks_users:
++  - project: "service"
++    user: "{{ zaqar_keystone_user }}"
++    password: "{{ zaqar_keystone_password }}"
++    role: "admin"
+diff --git a/ansible/roles/zaqar/handlers/main.yml b/ansible/roles/zaqar/handlers/main.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/handlers/main.yml
+@@ -0,0 +1,16 @@
++---
++- name: Restart zaqar-api container
++  vars:
++    service_name: "zaqar-api"
++    service: "{{ zaqar_services[service_name] }}"
++  become: true
++  kolla_container:
++    action: "recreate_or_restart_container"
++    common_options: "{{ docker_common_options }}"
++    name: "{{ service.container_name }}"
++    image: "{{ service.image }}"
++    volumes: "{{ service.volumes | reject('equalto', '') | list }}"
++    dimensions: "{{ service.dimensions }}"
++    healthcheck: "{{ service.healthcheck | default(omit) }}"
++  when:
++    - kolla_action != "config"
+diff --git a/ansible/roles/zaqar/tasks/main.yml b/ansible/roles/zaqar/tasks/main.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/main.yml
+@@ -0,0 +1,2 @@
++---
++- include_tasks: "{{ kolla_action }}.yml"
+diff --git a/ansible/roles/zaqar/tasks/config.yml b/ansible/roles/zaqar/tasks/config.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/config.yml
+@@ -0,0 +1,53 @@
++---
++- name: Ensuring config directories exist
++  file:
++    path: "{{ node_config_directory }}/{{ item.key }}"
++    state: "directory"
++    owner: "{{ config_owner_user }}"
++    group: "{{ config_owner_group }}"
++    mode: "0770"
++  become: true
++  with_dict: "{{ zaqar_services | select_services_enabled_and_mapped_to_host }}"
++
++- include_tasks: copy-certs.yml
++  when:
++    - zaqar_copy_certs | bool
++
++- name: Copying over config.json files for services
++  template:
++    src: "{{ item.key }}.json.j2"
++    dest: "{{ node_config_directory }}/{{ item.key }}/config.json"
++    mode: "0660"
++  become: true
++  with_dict: "{{ zaqar_services | select_services_enabled_and_mapped_to_host }}"
++
++- name: Copying over zaqar.conf
++  vars:
++    service_name: "{{ item.key }}"
++  merge_configs:
++    sources:
++      - "{{ role_path }}/templates/zaqar.conf.j2"
++      - "{{ node_custom_config }}/global.conf"
++      - "{{ node_custom_config }}/zaqar.conf"
++      - "{{ node_custom_config }}/zaqar/{{ item.key }}.conf"
++      - "{{ node_custom_config }}/zaqar/{{ inventory_hostname }}/zaqar.conf"
++    dest: "{{ node_config_directory }}/{{ item.key }}/zaqar.conf"
++    mode: "0660"
++  become: true
++  with_dict: "{{ zaqar_services | select_services_enabled_and_mapped_to_host }}"
++
++- name: Configure uWSGI for Zaqar
++  include_role:
++    name: service-uwsgi-config
++  vars:
++    project_services: "{{ zaqar_services }}"
++    service: "{{ zaqar_services['zaqar-api'] }}"
++    service_name: "zaqar-api"
++    service_uwsgi_config_http_port: "{{ zaqar_api_listen_port }}"
++    service_uwsgi_config_module: "{{ service.wsgi }}"
++    service_uwsgi_config_uid: "zaqar"
++    service_uwsgi_config_log_dir: "zaqar"
++    service_uwsgi_config_workers: "{{ zaqar_api_workers }}"
++  when:
++    - zaqar_wsgi_provider == "uwsgi"
++    - service | service_enabled_and_mapped_to_host
+diff --git a/ansible/roles/zaqar/tasks/deploy.yml b/ansible/roles/zaqar/tasks/deploy.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/deploy.yml
+@@ -0,0 +1,9 @@
++---
++- import_tasks: register.yml
++
++- import_tasks: config.yml
++
++- import_tasks: check-containers.yml
++
++- name: Flush handlers
++  meta: flush_handlers
+diff --git a/ansible/roles/zaqar/tasks/deploy-containers.yml b/ansible/roles/zaqar/tasks/deploy-containers.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/deploy-containers.yml
+@@ -0,0 +1,2 @@
++---
++- import_tasks: check-containers.yml
+diff --git a/ansible/roles/zaqar/tasks/check-containers.yml b/ansible/roles/zaqar/tasks/check-containers.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/check-containers.yml
+@@ -0,0 +1,3 @@
++---
++- import_role:
++    name: service-check-containers
+diff --git a/ansible/roles/zaqar/tasks/check.yml b/ansible/roles/zaqar/tasks/check.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/check.yml
+@@ -0,0 +1,3 @@
++---
++- import_role:
++    name: service-check
+diff --git a/ansible/roles/zaqar/tasks/config_validate.yml b/ansible/roles/zaqar/tasks/config_validate.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/config_validate.yml
+@@ -0,0 +1,7 @@
++---
++- import_role:
++    name: service-config-validate
++  vars:
++    service_config_validate_services: "{{ zaqar_services }}"
++    service_name: "{{ project_name }}"
++    service_config_validation: "{{ zaqar_config_validation }}"
+diff --git a/ansible/roles/zaqar/tasks/copy-certs.yml b/ansible/roles/zaqar/tasks/copy-certs.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/copy-certs.yml
+@@ -0,0 +1,6 @@
++---
++- name: "Copy certificates and keys for {{ project_name }}"
++  import_role:
++    name: service-cert-copy
++  vars:
++    project_services: "{{ zaqar_services }}"
+diff --git a/ansible/roles/zaqar/tasks/loadbalancer.yml b/ansible/roles/zaqar/tasks/loadbalancer.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/loadbalancer.yml
+@@ -0,0 +1,7 @@
++---
++- name: "Configure loadbalancer for {{ project_name }}"
++  import_role:
++    name: loadbalancer-config
++  vars:
++    project_services: "{{ zaqar_services }}"
++  tags: always
+diff --git a/ansible/roles/zaqar/tasks/precheck.yml b/ansible/roles/zaqar/tasks/precheck.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/precheck.yml
+@@ -0,0 +1,27 @@
++---
++- import_role:
++    name: service-precheck
++  vars:
++    service_precheck_services: "{{ zaqar_services }}"
++    service_name: "{{ project_name }}"
++
++- name: Get container facts
++  become: true
++  kolla_container_facts:
++    action: get_containers
++    container_engine: "{{ kolla_container_engine }}"
++    name:
++      - zaqar_api
++  check_mode: false
++  register: container_facts
++
++- name: Checking free port for Zaqar API
++  wait_for:
++    host: "{{ api_interface_address }}"
++    port: "{{ zaqar_api_port }}"
++    connect_timeout: 1
++    timeout: 1
++    state: stopped
++  when:
++    - container_facts.containers['zaqar_api'] is not defined
++    - inventory_hostname in groups['zaqar-api']
+diff --git a/ansible/roles/zaqar/tasks/pull.yml b/ansible/roles/zaqar/tasks/pull.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/pull.yml
+@@ -0,0 +1,5 @@
++---
++- import_role:
++    name: service-images-pull
++  when:
++    - not zaqar_use_local_images | bool
+diff --git a/ansible/roles/zaqar/tasks/reconfigure.yml b/ansible/roles/zaqar/tasks/reconfigure.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/reconfigure.yml
+@@ -0,0 +1,2 @@
++---
++- import_tasks: deploy.yml
+diff --git a/ansible/roles/zaqar/tasks/register.yml b/ansible/roles/zaqar/tasks/register.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/register.yml
+@@ -0,0 +1,7 @@
++---
++- import_role:
++    name: service-ks-register
++  vars:
++    service_ks_register_auth: "{{ openstack_zaqar_auth }}"
++    service_ks_register_services: "{{ zaqar_ks_services }}"
++    service_ks_register_users: "{{ zaqar_ks_users }}"
+diff --git a/ansible/roles/zaqar/tasks/stop.yml b/ansible/roles/zaqar/tasks/stop.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/stop.yml
+@@ -0,0 +1,6 @@
++---
++- import_role:
++    name: service-stop
++  vars:
++    project_services: "{{ zaqar_services }}"
++    service_name: "{{ project_name }}"
+diff --git a/ansible/roles/zaqar/tasks/upgrade.yml b/ansible/roles/zaqar/tasks/upgrade.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/tasks/upgrade.yml
+@@ -0,0 +1,7 @@
++---
++- import_tasks: config.yml
++
++- import_tasks: check-containers.yml
++
++- name: Flush handlers
++  meta: flush_handlers
+diff --git a/ansible/roles/zaqar/templates/zaqar-api.json.j2 b/ansible/roles/zaqar/templates/zaqar-api.json.j2
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/templates/zaqar-api.json.j2
+@@ -0,0 +1,35 @@
++{
++    "command": "uwsgi /etc/zaqar/zaqar-api-uwsgi.ini",
++    "config_files": [
++        {
++            "source": "{{ container_config_directory }}/zaqar.conf",
++            "dest": "/etc/zaqar/zaqar.conf",
++            "owner": "zaqar",
++            "perm": "0600"
++        },
++        {
++            "source": "{{ container_config_directory }}/zaqar-api-uwsgi.ini",
++            "dest": "/etc/zaqar/zaqar-api-uwsgi.ini",
++            "owner": "zaqar",
++            "perm": "0600"
++        }{% if kolla_copy_ca_into_containers | bool %},
++        {
++            "source": "{{ container_config_directory }}/ca-certificates",
++            "dest": "/var/lib/kolla/share/ca-certificates",
++            "owner": "root",
++            "perm": "0644"
++        }{% endif %}
++    ],
++    "permissions": [
++        {
++            "path": "/var/lib/zaqar",
++            "owner": "zaqar:zaqar",
++            "recurse": true
++        },
++        {
++            "path": "/var/log/kolla/zaqar",
++            "owner": "zaqar:kolla",
++            "recurse": true
++        }
++    ]
++}
+diff --git a/ansible/roles/zaqar/templates/zaqar.conf.j2 b/ansible/roles/zaqar/templates/zaqar.conf.j2
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/templates/zaqar.conf.j2
+@@ -0,0 +1,52 @@
++#jinja2: trim_blocks: False
++[DEFAULT]
++auth_strategy = keystone
++admin_mode = false
++pooling = false
++log_dir = /var/log/kolla/zaqar
++log_file = zaqar-api.log
++debug = {{ zaqar_logging_debug }}
++
++[drivers]
++transport = wsgi
++message_store = redis
++management_store = redis
++
++[drivers:transport:wsgi]
++bind = {{ api_interface_address }}
++port = {{ zaqar_api_port }}
++
++[drivers:message_store:redis]
++uri = {{ zaqar_valkey_connection_string }}
++max_reconnect_attempts = 10
++reconnect_sleep = 1.0
++
++[drivers:management_store:redis]
++uri = {{ zaqar_valkey_connection_string }}
++max_reconnect_attempts = 10
++reconnect_sleep = 1.0
++
++[keystone_authtoken]
++service_type = messaging
++www_authenticate_uri = {{ keystone_public_url }}
++auth_url = {{ keystone_internal_url }}
++auth_type = password
++project_domain_id = {{ default_project_domain_id }}
++user_domain_id = {{ default_user_domain_id }}
++project_name = service
++username = {{ zaqar_keystone_user }}
++password = {{ zaqar_keystone_password }}
++cafile = {{ openstack_cacert }}
++region_name = {{ openstack_region_name }}
++memcache_security_strategy = {{ memcache_security_strategy }}
++memcache_secret_key = {{ memcache_secret_key }}
++memcached_servers = {% for host in groups['memcached'] %}{{ 'api' | kolla_address(host) | put_address_in_context('memcache') }}:{{ memcached_port }}{% if not loop.last %},{% endif %}{% endfor %}
++
++[oslo_middleware]
++enable_proxy_headers_parsing = true
++
++[signed_url]
++secret_key = {{ zaqar_secret_key }}
++
++[oslo_concurrency]
++lock_path = /var/lib/zaqar/tmp
+diff --git a/ansible/roles/zaqar/vars/main.yml b/ansible/roles/zaqar/vars/main.yml
+new file mode 100644
+--- /dev/null
++++ b/ansible/roles/zaqar/vars/main.yml
+@@ -0,0 +1,2 @@
++---
++project_name: "zaqar"

@@ -41,6 +41,10 @@ if [[ -s ../../kolla-ansible-freezer-runtime.patch ]]; then
   git apply --check --whitespace=fix ../../kolla-ansible-freezer-runtime.patch
   git apply --whitespace=fix ../../kolla-ansible-freezer-runtime.patch
 fi
+if [[ -s ../../kolla-ansible-zaqar.patch ]]; then
+  git apply --check --whitespace=fix ../../kolla-ansible-zaqar.patch
+  git apply --whitespace=fix ../../kolla-ansible-zaqar.patch
+fi
 python3 setup.py develop
 cd ..
 

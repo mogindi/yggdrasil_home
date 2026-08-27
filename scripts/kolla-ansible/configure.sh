@@ -106,6 +106,9 @@ set_global_config enable_designate yes
 # Freezer is enabled through the release-pinned Kolla extension applied by
 # scripts/kolla-ansible/install.sh. Agents remain self-managed on tenant hosts.
 set_global_config enable_freezer yes
+# Zaqar is provided by the local Kolla extension and uses Kolla's Valkey
+# Sentinel cluster for both message and management storage.
+set_global_config enable_zaqar yes
 set_global_config enable_gnocchi yes
 set_global_config enable_grafana yes
 set_global_config enable_kuryr yes
@@ -333,6 +336,7 @@ openstack:
   service_mapping:
     alarming: aodh
     backup: freezer
+    messaging: zaqar
     metric: gnocchi
     volumev3: cinder
 EOF

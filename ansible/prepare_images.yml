@@ -33,6 +33,14 @@
           --tag quay.io/openstack.kolla/freezer-scheduler:{{ image_version }} \
           --file {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images/Dockerfile.scheduler \
           {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images
+        docker build --network host \
+          --build-arg BASE_IMAGE=quay.io/openstack.kolla/openstack-base:{{ image_version }} \
+          --build-arg ZAQAR_REF="${ZAQAR_REF:-stable/2025.2}" \
+          --build-arg ZAQAR_PIP_INDEX_URL="${ZAQAR_PIP_INDEX_URL:-https://pypi.org/simple}" \
+          --build-arg ZAQAR_PIP_EXTRA_INDEX_URL="${ZAQAR_PIP_EXTRA_INDEX_URL:-}" \
+          --tag quay.io/openstack.kolla/zaqar:{{ image_version }} \
+          --file {{ playbook_dir }}/../scripts/kolla-ansible/zaqar-images/Dockerfile \
+          {{ playbook_dir }}/../scripts/kolla-ansible/zaqar-images
       args:
         executable: /bin/bash
       when: (openstack_release|string) == '2025.2'
