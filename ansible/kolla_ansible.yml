@@ -95,6 +95,16 @@
         OPENSTACK_PATH_MTU: "{{ openstack_physnet_mtu | default(1500) }}"
       tags: configure
 
+    - name: Apply inventory-defined Kolla overrides
+      ansible.builtin.include_tasks:
+        file: tasks/kolla_overrides.yml
+        apply:
+          tags:
+            - configure
+      vars:
+        yggdrasil_kolla_config_dir: "{{ playbook_dir }}/../workspace/etc/kolla"
+      tags: configure
+
     - name: Run kolla-ansible
       debug:
         msg: 
