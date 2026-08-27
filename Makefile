@@ -212,8 +212,11 @@ kollaansible-fromtag-upgrade: kollaansible-prepare print-tags
 
 kollaansible-up-upgrade: kollaansible-images kollaansible-prepare kollaansible-prechecks kollaansible-upgrade kollaansible-lma
 
-kollaansible-tags-reconfigure: kollaansible-prepare
+kollaansible-tags-reconfigure: kollaansible-check-tags kollaansible-prepare
 	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t $(TAGS) -v
+
+kollaansible-check-tags:
+	@test -n "$(strip $(TAGS))" || { echo "TAGS is required; use for example TAGS='nova,neutron'" >&2; exit 2; }
 
 kollaansible-reconfigure: kollaansible-prepare
 	scripts/kolla-ansible/kolla-ansible.sh reconfigure -v
