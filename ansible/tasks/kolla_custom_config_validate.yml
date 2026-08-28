@@ -1,0 +1,27 @@
+---
+- name: Validate Kolla custom config host definitions
+  ansible.builtin.assert:
+    that:
+      - kolla_custom_host.key is string
+      - kolla_custom_host.key is match('^[A-Za-z0-9_.-]+$')
+      - kolla_custom_host.key in groups['deployment_nodes']
+      - kolla_custom_host.value is mapping
+    fail_msg: >-
+      Each Kolla custom config host must be a deployment_nodes hostname and
+      map filenames to string content.
+  loop: "{{ kolla_custom_service.value | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_host
+    label: "{{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}"
+
+- name: Validate Kolla custom config file definitions
+  ansible.builtin.include_tasks:
+    file: kolla_custom_config_validate_files.yml
+    apply:
+      tags:
+        - configure
+  loop: "{{ kolla_custom_service.value | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_host
+    label: "{{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}"
+  tags: configure

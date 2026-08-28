@@ -1,0 +1,24 @@
+---
+
+- name: Create the Kolla custom config host directory
+  ansible.builtin.file:
+    path: >-
+      {{ yggdrasil_kolla_config_dir }}/config/{{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}
+    state: directory
+    mode: '0755'
+  loop: "{{ kolla_custom_service.value | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_host
+    label: "{{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}"
+
+- name: Render each host's Kolla custom config files
+  ansible.builtin.include_tasks:
+    file: kolla_custom_config_files.yml
+    apply:
+      tags:
+        - configure
+  loop: "{{ kolla_custom_service.value | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_host
+    label: "{{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}"
+  tags: configure

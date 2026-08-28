@@ -1,0 +1,118 @@
+---
+- name: Validate Kolla global override map
+  ansible.builtin.assert:
+    that:
+      - (kolla_globals | default({})) is mapping
+    fail_msg: >-
+      kolla_globals must be a mapping of Kolla Ansible variable names to
+      values.
+
+- name: Validate Kolla custom config service definitions
+  ansible.builtin.assert:
+    that:
+      - item.key is string
+      - item.key is match('^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$')
+      - item.value is mapping
+    fail_msg: >-
+      Each kolla_custom_configs entry must map a safe service path to a
+      mapping of deployment-node hostnames and file definitions.
+  loop: "{{ (kolla_custom_configs | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Initialize the current custom-config path list
+  ansible.builtin.set_fact:
+    yggdrasil_custom_config_paths: []
+
+- name: Validate Kolla custom config host and file definitions
+  ansible.builtin.include_tasks:
+    file: kolla_custom_config_validate.yml
+    apply:
+      tags:
+        - configure
+  loop: "{{ (kolla_custom_configs | default({})) | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_service
+    label: "{{ kolla_custom_service.key }}"
+  tags: configure
+
+- name: Ensure the Kolla globals.d directory exists
+  ansible.builtin.file:
+    path: "{{ yggdrasil_kolla_config_dir }}/globals.d"
+    state: directory
+    mode: '0755'
+
+- name: Remove inventory-generated global overrides when none are configured
+  ansible.builtin.file:
+    path: "{{ yggdrasil_kolla_config_dir }}/globals.d/99-yggdrasil-ansible.yml"
+    state: absent
+  when: (kolla_globals | default({})) | length == 0
+
+- name: Render inventory-defined global Kolla overrides
+  ansible.builtin.copy:
+    dest: "{{ yggdrasil_kolla_config_dir }}/globals.d/99-yggdrasil-ansible.yml"
+    content: "{{ kolla_globals | default({}) | to_nice_yaml(indent=2, width=1000) }}"
+    mode: '0644'
+  when: (kolla_globals | default({})) | length > 0
+  no_log: true
+
+- name: Check for the previous custom-config manifest
+  ansible.builtin.stat:
+    path: "{{ yggdrasil_kolla_config_dir }}/.yggdrasil-custom-configs"
+  register: yggdrasil_custom_config_manifest_stat
+
+- name: Read the previous custom-config manifest
+  ansible.builtin.slurp:
+    src: "{{ yggdrasil_kolla_config_dir }}/.yggdrasil-custom-configs"
+  register: yggdrasil_custom_config_manifest
+  when: yggdrasil_custom_config_manifest_stat.stat.exists
+  no_log: true
+
+- name: Build the previous custom-config path list
+  ansible.builtin.set_fact:
+    yggdrasil_previous_custom_config_paths: >-
+      {{ (yggdrasil_custom_config_manifest.content | b64decode).splitlines() }}
+  when: yggdrasil_custom_config_manifest_stat.stat.exists
+
+- name: Initialize the previous custom-config path list
+  ansible.builtin.set_fact:
+    yggdrasil_previous_custom_config_paths: []
+  when: not yggdrasil_custom_config_manifest_stat.stat.exists
+
+- name: Validate managed custom-config paths before cleanup
+  ansible.builtin.assert:
+    that:
+      - item is match('^config/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+    fail_msg: "Invalid path in the generated Kolla custom-config manifest."
+  loop: "{{ yggdrasil_previous_custom_config_paths }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Remove custom-config files no longer present in inventory
+  ansible.builtin.file:
+    path: "{{ yggdrasil_kolla_config_dir }}/{{ item }}"
+    state: absent
+  loop: >-
+    {{ yggdrasil_previous_custom_config_paths
+       | difference(yggdrasil_custom_config_paths) }}
+  loop_control:
+    label: "{{ item }}"
+
+- name: Render inventory-defined Kolla custom configs
+  ansible.builtin.include_tasks:
+    file: kolla_custom_config.yml
+    apply:
+      tags:
+        - configure
+  loop: "{{ (kolla_custom_configs | default({})) | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_service
+    label: "{{ kolla_custom_service.key }}"
+  tags: configure
+
+- name: Write the generated custom-config manifest
+  ansible.builtin.copy:
+    dest: "{{ yggdrasil_kolla_config_dir }}/.yggdrasil-custom-configs"
+    content: |-
+      {{ yggdrasil_custom_config_paths | sort | join('\n') }}
+    mode: '0644'

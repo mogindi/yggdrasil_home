@@ -1,0 +1,27 @@
+---
+- name: Validate Kolla custom config file definitions
+  ansible.builtin.assert:
+    that:
+      - kolla_custom_file.key is string
+      - kolla_custom_file.key is match('^[A-Za-z0-9_.-]+$')
+      - kolla_custom_file.value is string
+    fail_msg: >-
+      Kolla custom config files must use a safe filename and contain string
+      content.
+  loop: "{{ kolla_custom_host.value | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_file
+    label: >-
+      {{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}/{{ kolla_custom_file.key }}
+
+- name: Track validated Kolla custom config files
+  ansible.builtin.set_fact:
+    yggdrasil_custom_config_paths: >-
+      {{ yggdrasil_custom_config_paths + [
+        'config/' ~ kolla_custom_service.key ~ '/' ~ kolla_custom_host.key ~ '/' ~ kolla_custom_file.key
+      ] }}
+  loop: "{{ kolla_custom_host.value | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_file
+    label: >-
+      {{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}/{{ kolla_custom_file.key }}

@@ -1,0 +1,13 @@
+---
+- name: Render inventory-defined Kolla custom config files
+  ansible.builtin.copy:
+    dest: >-
+      {{ yggdrasil_kolla_config_dir }}/config/{{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}/{{ kolla_custom_file.key }}
+    content: "{{ kolla_custom_file.value }}"
+    mode: '0644'
+  loop: "{{ kolla_custom_host.value | dict2items }}"
+  loop_control:
+    loop_var: kolla_custom_file
+    label: >-
+      {{ kolla_custom_service.key }}/{{ kolla_custom_host.key }}/{{ kolla_custom_file.key }}
+  no_log: true

@@ -233,6 +233,40 @@ scripts/kolla-ansible/kolla-ansible.sh reconfigure -t neutron
 
 Omit the extra variable, or set it to `false`, to keep packet logging disabled.
 
+Kolla-specific settings that are not exposed as dedicated Yggdrasil
+variables can be supplied through `kolla_globals`. Values in this mapping
+are written to `workspace/etc/kolla/globals.d/99-yggdrasil-ansible.yml`
+after the generated defaults, so they override those defaults:
+
+```yaml
+kolla_globals:
+  enable_ironic: true
+  nova_compute_virt_type: qemu
+  docker_custom_config:
+    live-restore: true
+```
+
+Per-host Kolla service configuration can be supplied through
+`kolla_custom_configs`. The map is organized as service, deployment-node
+hostname, filename, and literal file content. Files are rendered using
+Kolla's native host-specific layout:
+
+```yaml
+kolla_custom_configs:
+  nova:
+    hyper01:
+      nova.conf: |
+        [DEFAULT]
+        cpu_allocation_ratio = 8.0
+```
+
+The example creates
+`workspace/etc/kolla/config/nova/hyper01/nova.conf`. Service names may
+contain nested path components such as `cinder/cinder-volume`; hostnames
+and filenames must be single safe path components. Inventory-generated
+files are tracked and removed when they are deleted from
+`kolla_custom_configs`.
+
 7. **Validate inventory before deployment**
 
    ```bash
