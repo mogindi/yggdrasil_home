@@ -8,6 +8,24 @@
       set_fact:
         image_version: "{{ openstack_release }}-ubuntu-{% if (openstack_release|string) == '2025.2' %}noble{% else %}jammy{% endif %}"
 
+    - name: Build Mistral service images with OpenStack actions
+      shell: |
+        set -euo pipefail
+        for service in mistral-api mistral-engine mistral-event-engine mistral-executor; do
+          image=quay.io/openstack.kolla/$service:{{ image_version }}
+          docker pull "$image"
+          docker build --network host \
+            --build-arg BASE_IMAGE="$image" \
+            --tag "$image" \
+            --file {{ playbook_dir }}/../scripts/kolla-ansible/mistral-images/Dockerfile \
+            {{ playbook_dir }}/../scripts/kolla-ansible/mistral-images
+        done
+      args:
+        executable: /bin/bash
+      # configure.sh enables Mistral for this deployment.  Keep the build
+      # enabled when this playbook is run before Kolla's globals.yml exists.
+      when: enable_mistral | default(true) | bool
+
     - name: Build Freezer control-plane images
       shell: |
         set -euo pipefail

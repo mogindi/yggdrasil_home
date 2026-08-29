@@ -15,6 +15,7 @@ source kolla-venv/bin/activate
 pip install -U -c https://releases.openstack.org/constraints/upper/$OPENSTACK_RELEASE \
   openstacksdk \
   python-openstackclient \
+  python-mistralclient \
   python-heatclient \
   python-troveclient \
   python-magnumclient \

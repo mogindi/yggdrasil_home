@@ -117,6 +117,18 @@ set_global_config enable_manila yes
 set_global_config enable_manila_backend_generic yes
 #set_global_config enable_masakari yes  # hacluster must be enabled - but this is an aio
 set_global_config enable_mistral yes
+
+# Mistral creates a Keystone trust when a cron trigger is provisioned.  Its
+# legacy security client is explicitly the Keystone v3 client and therefore
+# needs the versioned identity URL, unlike the generic middleware settings
+# emitted by Kolla.
+mkdir -p "$CONFIG_DIR/config"
+cat > "$CONFIG_DIR/config/mistral.conf" <<EOF
+[keystone_authtoken]
+www_authenticate_uri = http://$OPENSTACK_KOLLA_INTERNAL_VIP_ADDRESS:5000/v3
+auth_url = http://$OPENSTACK_KOLLA_INTERNAL_VIP_ADDRESS:5000/v3
+EOF
+
 #set_global_config enable_murano yes  # broken in 2023.2 for some reason
 #set_global_config enable_neutron_vpnaas yes  # broken in 2025.1
 set_global_config enable_octavia yes
