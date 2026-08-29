@@ -352,6 +352,7 @@ openstack:
   service_mapping:
     alarming: aodh
     backup: freezer
+    clustering: senlin
     messaging: zaqar
     metric: gnocchi
     volumev3: cinder
