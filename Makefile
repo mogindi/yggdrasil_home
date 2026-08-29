@@ -3,6 +3,14 @@ SHELL:=/bin/bash
 ENV = hetzner-vagrant-dev01
 ARGS = 
 TAGS = 
+# Optional Ansible vault password file. VAULT_FILE and the standard
+# ANSIBLE_VAULT_PASSWORD_FILE environment variable are also supported.
+VAULT_FILE ?= $(ANSIBLE_VAULT_PASSWORD_FILE)
+VAULT_PASSWORD_FILE ?= $(VAULT_FILE)
+VAULT_ARGS = $(if $(strip $(VAULT_PASSWORD_FILE)),--vault-password-file $(VAULT_PASSWORD_FILE),)
+ifneq ($(strip $(VAULT_PASSWORD_FILE)),)
+export ANSIBLE_VAULT_PASSWORD_FILE := $(VAULT_PASSWORD_FILE)
+endif
 
 #########
 # Setup #
@@ -16,78 +24,78 @@ prepare-ansible:
 	ln -sfr ansible/ansible.cfg /etc/ansible/ansible.cfg
 
 harden:
-	ansible-playbook ansible/harden.yml $(ARGS)
+	ansible-playbook ansible/harden.yml $(VAULT_ARGS) $(ARGS)
 
 docker:
-	ansible-playbook ansible/docker.yml $(ARGS)
+	ansible-playbook ansible/docker.yml $(VAULT_ARGS) $(ARGS)
 
 vpn: 
-	ansible-playbook ansible/vpn.yml $(ARGS)
+	ansible-playbook ansible/vpn.yml $(VAULT_ARGS) $(ARGS)
 
 provider-gateway-vip: 
-	ansible-playbook ansible/provider_gateway_vip.yml $(ARGS)
+	ansible-playbook ansible/provider_gateway_vip.yml $(VAULT_ARGS) $(ARGS)
 
 devices-configure:
-	ansible-playbook ansible/devices.yml $(ARGS)
+	ansible-playbook ansible/devices.yml $(VAULT_ARGS) $(ARGS)
 
 checks:
-	ansible-playbook ansible/checks.yml $(ARGS)
+	ansible-playbook ansible/checks.yml $(VAULT_ARGS) $(ARGS)
 
 cephadm-deploy:
-	ansible-playbook ansible/cephadm.yml $(ARGS)
+	ansible-playbook ansible/cephadm.yml $(VAULT_ARGS) $(ARGS)
 
 # kolla-ansible #
 
 kollaansible-images:
-	ansible-playbook ansible/prepare_images.yml $(ARGS)
+	ansible-playbook ansible/prepare_images.yml $(VAULT_ARGS) $(ARGS)
 
 kollaansible-prepare-full:
-	ansible-playbook ansible/kolla_ansible.yml $(ARGS)
+	ansible-playbook ansible/kolla_ansible.yml $(VAULT_ARGS) $(ARGS)
 
 kollaansible-prepare:
-	ansible-playbook ansible/kolla_ansible.yml -t configure $(ARGS)
+	ansible-playbook ansible/kolla_ansible.yml -t configure $(VAULT_ARGS) $(ARGS)
 
 kollaansible-create-certs:
-	scripts/kolla-ansible/kolla-ansible.sh octavia-certificates
+	scripts/kolla-ansible/kolla-ansible.sh octavia-certificates $(VAULT_ARGS)
 
 kollaansible-bootstrap:
-	scripts/kolla-ansible/kolla-ansible.sh bootstrap-servers
+	scripts/kolla-ansible/kolla-ansible.sh bootstrap-servers $(VAULT_ARGS)
 
 kollaansible-prechecks:
-	scripts/kolla-ansible/kolla-ansible.sh prechecks
+	scripts/kolla-ansible/kolla-ansible.sh prechecks $(VAULT_ARGS)
 
 kollaansible-deploy:
-	scripts/kolla-ansible/kolla-ansible.sh deploy $(ARGS) || scripts/kolla-ansible/kolla-ansible.sh deploy $(ARGS)
+	scripts/kolla-ansible/kolla-ansible.sh deploy $(VAULT_ARGS) $(ARGS) || scripts/kolla-ansible/kolla-ansible.sh deploy $(VAULT_ARGS) $(ARGS)
 
 kollaansible-upgrade:
-	scripts/kolla-ansible/kolla-ansible.sh upgrade $(ARGS)
+	scripts/kolla-ansible/kolla-ansible.sh upgrade $(VAULT_ARGS) $(ARGS)
 
 kollaansible-postdeploy:
-	scripts/kolla-ansible/kolla-ansible.sh post-deploy
+	scripts/kolla-ansible/kolla-ansible.sh post-deploy $(VAULT_ARGS)
 
 kollaansible-lma:
-	ansible-playbook ansible/lma.yml -v $(ARGS)
-	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus
+	ansible-playbook ansible/lma.yml -v $(VAULT_ARGS) $(ARGS)
+	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus $(VAULT_ARGS)
 
 prometheus-alerts:
-	ansible-playbook ansible/lma.yml -v -t copy_rules $(ARGS)
-	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus
+	ansible-playbook ansible/lma.yml -v -t copy_rules $(VAULT_ARGS) $(ARGS)
+	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus $(VAULT_ARGS)
 
 alertmanager-pagerduty:
-	ansible-playbook ansible/lma.yml -v -t pagerduty $(ARGS)
-	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus
+	ansible-playbook ansible/lma.yml -v -t pagerduty $(VAULT_ARGS) $(ARGS)
+	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t prometheus $(VAULT_ARGS)
 
 # openstack #
 
 openstack-client-install:
-	ansible-playbook ansible/client.yml $(ARGS)
+	ansible-playbook ansible/client.yml $(VAULT_ARGS) $(ARGS)
 
 openstack-project-resources:
 	@test -n "$(PROJECT)" || (echo "PROJECT is required, for example: make openstack-project-resources PROJECT=admin" >&2; exit 2)
 	@if [[ -f workspace/kolla-venv/bin/activate ]]; then source workspace/kolla-venv/bin/activate; fi; scripts/openstack/list-project-resources.py --project "$(PROJECT)" $(ARGS)
 
 openstack-resources-init:
-	ansible-playbook ansible/init_resources.yml $(ARGS)
+	ansible-playbook ansible/init_resources.yml $(VAULT_ARGS) $(ARGS)
 	#scripts/openstack/init-resources.sh
 
 openstack-images-upload:
@@ -105,10 +113,10 @@ symlink-etc-kolla:
 	ln -sfr workspace/etc/kolla/* /etc/kolla/
 
 openstack-octavia:
-	ansible-playbook ansible/openstack_initialize/octavia.yml $(ARGS)
+	ansible-playbook ansible/openstack_initialize/octavia.yml $(VAULT_ARGS) $(ARGS)
 
 openstack-rgw:
-	ansible-playbook ansible/openstack_initialize/rgw.yml $(ARGS)
+	ansible-playbook ansible/openstack_initialize/rgw.yml $(VAULT_ARGS) $(ARGS)
 
 openstack-cinder-backup-test:
 	scripts/tests/cinder-backup.sh
@@ -124,21 +132,21 @@ openstack-senlin-test:
 
 openstack-magnum:
 #	scripts/tests/magnum.sh
-	ansible-playbook ansible/openstack_initialize/magnum.yml $(ARGS)
+	ansible-playbook ansible/openstack_initialize/magnum.yml $(VAULT_ARGS) $(ARGS)
 
 openstack-manila:
 #	scripts/tests/manila.sh
-	ansible-playbook ansible/openstack_initialize/manila.yml $(ARGS)
+	ansible-playbook ansible/openstack_initialize/manila.yml $(VAULT_ARGS) $(ARGS)
 
 openstack-trove:
 #	scripts/tests/trove_postgres.sh
-	ansible-playbook ansible/openstack_initialize/trove.yml $(ARGS)
+	ansible-playbook ansible/openstack_initialize/trove.yml $(VAULT_ARGS) $(ARGS)
 
 openstack-trove-mongodb-image:
 	scripts/openstack/upload-images.sh --trove-mongodb
 
 openstack-trove-mongodb-test:
-	ansible-playbook ansible/openstack_initialize/trove_mongodb.yml $(ARGS)
+	ansible-playbook ansible/openstack_initialize/trove_mongodb.yml $(VAULT_ARGS) $(ARGS)
 
 openstack-remove-test-resources:
 	scripts/tests/remove-all.sh
@@ -193,52 +201,52 @@ ping-nodes:
 
 # print ansible inventory vars
 print-ansible-vars:
-	ansible all -m debug -a "var=hostvars"
+	ansible all $(VAULT_ARGS) -m debug -a "var=hostvars"
 	
 # missing tags that are used with "import_playbook" list nova
 print-tags:
 	@grep "^        tags:" workspace/kolla-ansible/ansible/site.yml | sed 's/        tags: //g; s/ }//g; s/,.*//g; s/\[//g' | xargs | sed 's/ /,/g' | sed 's/,ovn,ovn/,ovn,nova/' |  tee /tmp/print-tags
 
 kollaansible-tags-deploy: kollaansible-prepare
-	scripts/kolla-ansible/kolla-ansible.sh deploy -t $(TAGS)
+	scripts/kolla-ansible/kolla-ansible.sh deploy -t $(TAGS) $(VAULT_ARGS)
 
 kollaansible-tags-upgrade: kollaansible-prepare
-	scripts/kolla-ansible/kolla-ansible.sh upgrade -t $(TAGS)
+	scripts/kolla-ansible/kolla-ansible.sh upgrade -t $(TAGS) $(VAULT_ARGS)
 
 # Set single tag
 kollaansible-fromtag-deploy: kollaansible-prepare print-tags
 	all_tags=$$(cat /tmp/print-tags) && \
 	remaining_tags=$$(echo $$all_tags | grep -o $(TAGS).*) && \
-	scripts/kolla-ansible/kolla-ansible.sh deploy -t $$remaining_tags
+	scripts/kolla-ansible/kolla-ansible.sh deploy -t $$remaining_tags $(VAULT_ARGS)
 
 kollaansible-fromtag-upgrade: kollaansible-prepare print-tags
 	all_tags=$$(cat /tmp/print-tags) && \
 	remaining_tags=$$(echo $$all_tags | grep -o $(TAGS).*) && \
-	scripts/kolla-ansible/kolla-ansible.sh upgrade -t $$remaining_tags
+	scripts/kolla-ansible/kolla-ansible.sh upgrade -t $$remaining_tags $(VAULT_ARGS)
 
 kollaansible-up-upgrade: kollaansible-images kollaansible-prepare kollaansible-prechecks kollaansible-upgrade kollaansible-lma
 
 kollaansible-tags-reconfigure: kollaansible-check-tags kollaansible-prepare
-	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t $(TAGS) -v
+	scripts/kolla-ansible/kolla-ansible.sh reconfigure -t $(TAGS) -v $(VAULT_ARGS)
 
 kollaansible-check-tags:
 	@test -n "$(strip $(TAGS))" || { echo "TAGS is required; use for example TAGS='nova,neutron'" >&2; exit 2; }
 
 kollaansible-reconfigure: kollaansible-prepare
-	scripts/kolla-ansible/kolla-ansible.sh reconfigure -v
+	scripts/kolla-ansible/kolla-ansible.sh reconfigure -v $(VAULT_ARGS)
 
 kollaansible-destroy:
-	scripts/kolla-ansible/kolla-ansible.sh destroy --yes-i-really-really-mean-it
+	scripts/kolla-ansible/kolla-ansible.sh destroy --yes-i-really-really-mean-it $(VAULT_ARGS)
 	@echo -e "-----\nPLEASE REBOOT NODES\n-----"; sleep 5
 
 kollaansible-purge: kollaansible-destroy
 	@rm -rf workspace
 
 cephadm-destroy:
-	ansible-playbook ansible/cephadm.yml -t destroy
+	ansible-playbook ansible/cephadm.yml -t destroy $(VAULT_ARGS)
 
 devices-destroy:
-	ansible-playbook ansible/devices.yml -t destroy
+	ansible-playbook ansible/devices.yml -t destroy $(VAULT_ARGS)
 
 openstack-resources-destroy:
 	scripts/openstack/destroy-resources.sh
