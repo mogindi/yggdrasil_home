@@ -21,7 +21,38 @@ senlin_external_fqdn: "{{ kolla_external_fqdn }}"
 senlin_api_port: "8778"
 senlin_api_listen_port: "{{ senlin_api_port }}"
 senlin_api_public_port: "{{ haproxy_single_external_frontend_public_port if haproxy_single_external_frontend | bool else senlin_api_port }}"
+# These compatibility variables were removed from current Kolla-Ansible, but
+# the restored 2023-era Senlin template still checks them when rendering its
+# oslo.messaging section.
+om_enable_rabbitmq_high_availability: false
+om_enable_rabbitmq_quorum_queues: true
 EOF
+
+cat >> etc/kolla/passwords.yml <<'EOF'
+
+senlin_database_password:
+senlin_keystone_password:
+EOF
+
+bootstrap_block=$(mktemp)
+cat >"$bootstrap_block" <<'EOF'
+- name: Ensuring Senlin log directory exists
+  become: true
+  file:
+    path: "{{ container_engine_volumes_path }}/kolla_logs/_data/senlin"
+    state: directory
+    owner: "42443"
+    group: "42400"
+    mode: "2775"
+
+EOF
+{
+  head -n 1 ansible/roles/senlin/tasks/bootstrap.yml
+  cat "$bootstrap_block"
+  tail -n +2 ansible/roles/senlin/tasks/bootstrap.yml
+} > ansible/roles/senlin/tasks/bootstrap.yml.tmp
+mv ansible/roles/senlin/tasks/bootstrap.yml.tmp ansible/roles/senlin/tasks/bootstrap.yml
+rm -f "$bootstrap_block"
 
 sed -i '/^[[:space:]]*- enable_skyline_{{ enable_skyline | bool }}/i\        - enable_senlin_{{ enable_senlin | bool }}' ansible/site.yml
 
@@ -35,8 +66,22 @@ cat >"$loadbalancer_block" <<'EOF'
 EOF
 awk -v block_file="$loadbalancer_block" '
   BEGIN { while ((getline line < block_file) > 0) block = block line ORS }
-  /^[[:space:]]+name: skyline$/ { printf "%s", block }
-  { print }
+  {
+    if ($0 ~ /^        - include_role:$/) {
+      include_line = $0
+      next_line = ""
+      if ((getline next_line) > 0 && next_line ~ /^            name: skyline$/) {
+        printf "%s", block
+        print include_line
+        print next_line
+        next
+      }
+      print include_line
+      if (next_line != "") print next_line
+      next
+    }
+    print
+  }
 ' ansible/site.yml > ansible/site.yml.tmp
 mv ansible/site.yml.tmp ansible/site.yml
 rm -f "$loadbalancer_block"

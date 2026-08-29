@@ -1,0 +1,3 @@
+#!/bin/bash
+
+. /usr/local/bin/kolla_senlin_extend_start

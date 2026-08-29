@@ -19,11 +19,6 @@ git clone --branch $BRANCH https://github.com/openstack/kolla-ansible.git
 
 # apply patch and setup
 cd kolla-ansible
-# Senlin was removed from Kolla-Ansible in 2024.1. Restore its role and wire it
-# into the current branch layout before applying Yggdrasil's other extensions.
-if [[ "$OPENSTACK_RELEASE" == '2025.2' ]]; then
-  bash ../../scripts/kolla-ansible/restore-senlin.sh
-fi
 if [[ -s ../../kolla-ansible.patch ]]; then
   git apply --check --whitespace=fix < <(
     sed '/^diff --git a\/ansible\/library/,$d' ../../kolla-ansible.patch
@@ -47,8 +42,14 @@ if [[ -s ../../kolla-ansible-freezer-runtime.patch ]]; then
   git apply --whitespace=fix ../../kolla-ansible-freezer-runtime.patch
 fi
 if [[ -s ../../kolla-ansible-zaqar.patch ]]; then
-  git apply --check --whitespace=fix ../../kolla-ansible-zaqar.patch
-  git apply --whitespace=fix ../../kolla-ansible-zaqar.patch
+	git apply --check --whitespace=fix ../../kolla-ansible-zaqar.patch
+	git apply --whitespace=fix ../../kolla-ansible-zaqar.patch
+fi
+# Senlin was removed from Kolla-Ansible in 2024.1. Restore its role and wire it
+# into the current branch layout after the other Yggdrasil extensions have been
+# applied, so their site.yml hunks retain their upstream context.
+if [[ "$OPENSTACK_RELEASE" == '2025.2' ]]; then
+  bash ../../scripts/kolla-ansible/restore-senlin.sh
 fi
 python3 setup.py develop
 cd ..

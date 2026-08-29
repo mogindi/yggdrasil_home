@@ -11,7 +11,7 @@ set -euo pipefail
 tmp_spec=$(mktemp)
 profile_id=''
 cluster_id=''
-trap 'rm -f "$tmp_spec"; [ -z "$cluster_id" ] || openstack cluster delete --yes "$cluster_id" >/dev/null 2>&1 || true; [ -z "$profile_id" ] || openstack cluster profile delete --yes "$profile_id" >/dev/null 2>&1 || true' EXIT
+trap 'rm -f "$tmp_spec"; [ -z "$cluster_id" ] || openstack cluster delete --force --force-delete --wait "$cluster_id" >/dev/null 2>&1 || true; [ -z "$profile_id" ] || openstack cluster profile delete --force "$profile_id" >/dev/null 2>&1 || true' EXIT
 
 cat >"$tmp_spec" <<EOF
 type: os.nova.server
@@ -25,8 +25,8 @@ properties:
     - network: ${SENLIN_TEST_NETWORK}
 EOF
 
-profile_id=$(openstack cluster profile create --spec-file "$tmp_spec" "$SENLIN_TEST_NAME-profile" -f value -c id)
-cluster_id=$(openstack cluster create --profile "$profile_id" --min-size 1 --desired-capacity 1 --max-size 2 "$SENLIN_TEST_NAME" -f value -c id)
+profile_id=$(openstack cluster profile create -f value -c id --spec-file "$tmp_spec" "$SENLIN_TEST_NAME-profile")
+cluster_id=$(openstack cluster create -f value -c id --profile "$profile_id" --min-size 1 --desired-capacity 1 --max-size 2 "$SENLIN_TEST_NAME")
 
 for _ in $(seq 1 30); do
   status=$(openstack cluster show "$cluster_id" -f value -c status)
@@ -37,6 +37,6 @@ for _ in $(seq 1 30); do
   sleep 5
 done
 [ "$(openstack cluster show "$cluster_id" -f value -c status)" = ACTIVE ]
-openstack cluster scale out "$cluster_id" --count 1 >/dev/null
+openstack cluster expand --count 1 --wait "$cluster_id" >/dev/null
 openstack cluster show "$cluster_id" >/dev/null
 echo "Senlin cluster lifecycle smoke test passed: $cluster_id"

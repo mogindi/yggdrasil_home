@@ -61,7 +61,7 @@
           {{ playbook_dir }}/../scripts/kolla-ansible/zaqar-images
         docker build --network host \
           --build-arg BASE_IMAGE=quay.io/openstack.kolla/openstack-base:{{ image_version }} \
-          --build-arg SENLIN_VERSION=13.0.0 \
+          --build-arg SENLIN_VERSION=16.0.0 \
           --tag senlin-base:{{ image_version }} \
           --file {{ playbook_dir }}/../scripts/kolla-ansible/senlin-images/Dockerfile \
           {{ playbook_dir }}/../scripts/kolla-ansible/senlin-images
