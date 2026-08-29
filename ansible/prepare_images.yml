@@ -59,6 +59,16 @@
           --tag quay.io/openstack.kolla/zaqar:{{ image_version }} \
           --file {{ playbook_dir }}/../scripts/kolla-ansible/zaqar-images/Dockerfile \
           {{ playbook_dir }}/../scripts/kolla-ansible/zaqar-images
+        docker build --network host \
+          --build-arg BASE_IMAGE=quay.io/openstack.kolla/openstack-base:{{ image_version }} \
+          --build-arg SENLIN_VERSION=13.0.0 \
+          --tag senlin-base:{{ image_version }} \
+          --file {{ playbook_dir }}/../scripts/kolla-ansible/senlin-images/Dockerfile \
+          {{ playbook_dir }}/../scripts/kolla-ansible/senlin-images
+        for service in api conductor engine health-manager; do
+          docker tag senlin-base:{{ image_version }} \
+            quay.io/openstack.kolla/senlin-${service}:{{ image_version }}
+        done
       args:
         executable: /bin/bash
       when: (openstack_release|string) == '2025.2'

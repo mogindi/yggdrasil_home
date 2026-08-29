@@ -142,7 +142,11 @@ set_global_config prometheus_openstack_exporter_cmdline_extras '"--disable-metri
 #set_global_config enable_redis yes
 set_global_config enable_valkey yes
 set_global_config enable_sahara yes
-set_global_config enable_senlin yes
+if [[ "${OPENSTACK_RELEASE:-}" == '2025.2' ]]; then
+	set_global_config enable_senlin yes
+else
+	set_global_config enable_senlin no
+fi
 set_global_config enable_skyline yes
 set_global_config enable_solum yes
 set_global_config enable_tacker yes

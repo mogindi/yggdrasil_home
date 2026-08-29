@@ -20,6 +20,7 @@ Use this repository when you want to:
 - Deploy a reproducible dev environment with Vagrant.
 - Run specific lifecycle steps independently (prepare, deploy, reconfigure, upgrade, destroy).
 - Bootstrap OpenStack test resources and service integrations (Octavia, RGW, Magnum, Manila, Trove).
+- Deploy Senlin-backed VM autoscaling for OpenStack 2025.2.
 - Enable LMA alerts and optional PagerDuty integration.
 
 ---
@@ -465,6 +466,9 @@ Below is a complete catalog of Make targets in this repo.
   create-from-backup workflows, then removes them.
 - `openstack-freezer-test` — verifies the Keystone `backup` service and
   endpoint, the `freezer` CLI, and the Freezer v2 API.
+- `openstack-senlin-test` — verifies the Senlin cluster lifecycle and VM
+  scaling path. Set `SENLIN_TEST_IMAGE`, `SENLIN_TEST_FLAVOR`,
+  `SENLIN_TEST_NETWORK`, and `SENLIN_TEST_KEYPAIR` for the target cloud.
 - `scripts/openstack/install-freezer-agent.sh` — installs the release-pinned
   Freezer agent and scheduler into a self-managed virtual environment.
 - `symlink-etc-kolla` — symlinks `workspace/etc/kolla/*` into `/etc/kolla/`.

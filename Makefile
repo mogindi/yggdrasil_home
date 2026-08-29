@@ -119,6 +119,9 @@ openstack-freezer-test:
 openstack-zaqar-test:
 	scripts/tests/zaqar.sh
 
+openstack-senlin-test:
+	scripts/tests/senlin.sh
+
 openstack-magnum:
 #	scripts/tests/magnum.sh
 	ansible-playbook ansible/openstack_initialize/magnum.yml $(ARGS)

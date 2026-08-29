@@ -72,6 +72,7 @@
       args:
         chdir: "{{ playbook_dir }}/.."
       environment:
+        OPENSTACK_RELEASE: "{{ openstack_release }}"
         CLOUDKITTY_METRICS_FILE: /tmp/yggdrasil-cloudkitty-metrics.yml
         OPENSTACK_NOVA_POLICY_FILE: /tmp/yggdrasil-nova-reader-policy.yaml
         OPENSTACK_CINDER_POLICY_FILE: /tmp/yggdrasil-cinder-reader-policy.yaml

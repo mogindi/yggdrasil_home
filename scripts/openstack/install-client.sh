@@ -31,4 +31,5 @@ pip install -U -c https://releases.openstack.org/constraints/upper/$OPENSTACK_RE
   python-zunclient \
   python-octaviaclient \
   python-barbicanclient \
-  python-freezerclient==6.1.0
+  python-freezerclient==6.1.0 \
+  python-senlinclient
