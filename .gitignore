@@ -77,3 +77,6 @@ terraform/terraform*.tfstate*
 ansible/inventory/**
 !ansible/inventory/aio
 !ansible/inventory/vagrant**
+!ansible/inventory/aio/group_vars/
+!ansible/inventory/aio/group_vars/all/
+!ansible/inventory/aio/group_vars/all/*.yaml
