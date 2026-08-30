@@ -345,6 +345,15 @@ mkdir -p "$config_dir"
 CINDER_POLICY_SOURCE="${OPENSTACK_CINDER_POLICY_FILE:-$SCRIPT_DIR/policies/cinder/policy.yaml}"
 cp "$CINDER_POLICY_SOURCE" "$config_dir/policy.yaml"
 
+# Data control-plane APIs use the same project-scoped Data role tiers.
+for service in mistral barbican heat; do
+  policy_source="$SCRIPT_DIR/policies/$service/policy.yaml"
+  if [[ -f "$policy_source" ]]; then
+    mkdir -p "etc/kolla/config/$service"
+    cp "$policy_source" "etc/kolla/config/$service/policy.yaml"
+  fi
+done
+
 # skyline
 mkdir -p etc/kolla/config/skyline/
 cat >  etc/kolla/config/skyline/skyline.yaml <<EOF

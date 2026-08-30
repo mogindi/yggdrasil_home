@@ -1,0 +1,6 @@
+# Data workspace stacks may be managed by editors; destructive lifecycle is
+# reserved for Data administrators.
+"stacks:create": "role:data_editor or role:data_admin"
+"stacks:show": "role:data_reader or role:data_editor or role:data_admin"
+"stacks:list": "role:data_reader or role:data_editor or role:data_admin"
+"stacks:delete": "role:data_admin"

@@ -1,0 +1,5 @@
+# ETL credentials are project-scoped Data resources.
+"secret:get": "role:data_reader or role:data_editor or role:data_admin"
+"secret:list": "role:data_reader or role:data_editor or role:data_admin"
+"secret:put": "role:data_editor or role:data_admin"
+"secret:delete": "role:data_admin"

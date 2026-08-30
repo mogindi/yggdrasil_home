@@ -1,0 +1,6 @@
+# Mistral workflow lifecycle is a Data editor operation; administrative
+# workflow inspection/deletion remains restricted to Data administrators.
+"workflow:create": "role:data_editor or role:data_admin"
+"workflow:delete": "role:data_admin"
+"execution:create": "role:data_editor or role:data_admin"
+"execution:delete": "role:data_admin"
