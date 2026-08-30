@@ -3,8 +3,8 @@ SHELL:=/bin/bash
 ENV = hetzner-vagrant-dev01
 ARGS = 
 TAGS = 
-# Ansible vault password files are fixed per environment.
-override VAULT_PASSWORD_FILE := $(HOME)/.ansible_vault_$(ENV)
+# Ansible vault password file is shared across environments.
+override VAULT_PASSWORD_FILE := $(HOME)/.ansible_vault
 ifeq ($(wildcard $(VAULT_PASSWORD_FILE)),)
 $(error Ansible vault password file not found: $(VAULT_PASSWORD_FILE))
 endif

@@ -100,7 +100,7 @@ The Makefile uses these variables:
 - `ENV` (default: `hetzner-vagrant-dev01`): selects inventory directory under `ansible/inventory/<ENV>`.
 - `ARGS`: extra flags passed through to some `ansible-playbook` commands.
 - `TAGS`: tags used by `kollaansible-*tag*` targets.
-- Ansible vault password: Ansible targets always use `~/.ansible_vault_<ENV>`. Make exits with an error if the file does not exist.
+- Ansible vault password: Ansible targets always use `~/.ansible_vault`. Make exits with an error if the file does not exist.
 
 Available inventories in-tree:
 
@@ -119,8 +119,8 @@ make all-up ENV=aio
 # Pass extra ansible options
 make harden ENV=aio ARGS='--limit control01 -v'
 
-# Ansible targets use ~/.ansible_vault_aio as their vault password file
-install -m 600 /path/to/vault-password ~/.ansible_vault_aio
+# Ansible targets use ~/.ansible_vault as their vault password file
+install -m 600 /path/to/vault-password ~/.ansible_vault
 make harden ENV=aio
 ```
 
