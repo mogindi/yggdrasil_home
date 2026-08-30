@@ -3,14 +3,12 @@ SHELL:=/bin/bash
 ENV = hetzner-vagrant-dev01
 ARGS = 
 TAGS = 
-# Optional Ansible vault password file. VAULT_FILE and the standard
-# ANSIBLE_VAULT_PASSWORD_FILE environment variable are also supported.
-VAULT_FILE ?= $(ANSIBLE_VAULT_PASSWORD_FILE)
-VAULT_PASSWORD_FILE ?= $(VAULT_FILE)
-VAULT_ARGS = $(if $(strip $(VAULT_PASSWORD_FILE)),--vault-password-file $(VAULT_PASSWORD_FILE),)
-ifneq ($(strip $(VAULT_PASSWORD_FILE)),)
-export ANSIBLE_VAULT_PASSWORD_FILE := $(VAULT_PASSWORD_FILE)
+# Ansible vault password files are fixed per environment.
+override VAULT_PASSWORD_FILE := $(HOME)/.ansible_vault_$(ENV)
+ifeq ($(wildcard $(VAULT_PASSWORD_FILE)),)
+$(error Ansible vault password file not found: $(VAULT_PASSWORD_FILE))
 endif
+VAULT_ARGS := --vault-password-file "$(VAULT_PASSWORD_FILE)"
 
 #########
 # Setup #
