@@ -3,63 +3,14 @@ SHELL:=/bin/bash
 ENV = hetzner-vagrant-dev01
 ARGS = 
 TAGS = 
-# Each environment has its own local Ansible vault password file.
-override VAULT_PASSWORD_FILE := $(HOME)/.ansible_vault_$(ENV)
-VAULT_ARGS := --vault-password-file "$(VAULT_PASSWORD_FILE)"
-
-ANSIBLE_TARGETS = \
-	harden \
-	docker \
-	vpn \
-	provider-gateway-vip \
-	devices-configure \
-	checks \
-	cephadm-deploy \
-	kollaansible-images \
-	kollaansible-prepare-full \
-	kollaansible-prepare \
-	kollaansible-create-certs \
-	kollaansible-bootstrap \
-	kollaansible-prechecks \
-	kollaansible-deploy \
-	kollaansible-upgrade \
-	kollaansible-postdeploy \
-	kollaansible-lma \
-	prometheus-alerts \
-	alertmanager-pagerduty \
-	openstack-client-install \
-	openstack-resources-init \
-	openstack-octavia \
-	openstack-rgw \
-	openstack-magnum \
-	openstack-manila \
-	openstack-trove \
-	openstack-trove-mongodb-test \
-	print-ansible-vars \
-	kollaansible-tags-deploy \
-	kollaansible-tags-upgrade \
-	kollaansible-fromtag-deploy \
-	kollaansible-fromtag-upgrade \
-	kollaansible-tags-reconfigure \
-	kollaansible-reconfigure \
-	kollaansible-destroy \
-	cephadm-destroy \
-	devices-destroy
-
-.PHONY: check-vault-password-file
-
-$(ANSIBLE_TARGETS): check-vault-password-file
-
-check-vault-password-file:
-	@if [[ ! -f "$(VAULT_PASSWORD_FILE)" ]]; then \
-		echo "WARNING: Ansible vault password file not found: $(VAULT_PASSWORD_FILE)" >&2; \
-		echo "Create the file before continuing, or press Ctrl-C to abort." >&2; \
-		read -r -p "Create it, then press Enter to continue (Ctrl-C to abort): " _ || true; \
-	fi
-	@test -f "$(VAULT_PASSWORD_FILE)" || { \
-		echo "Ansible vault password file is still missing: $(VAULT_PASSWORD_FILE)" >&2; \
-		exit 1; \
-	}
+# Optional Ansible vault password file. VAULT_FILE and the standard
+# ANSIBLE_VAULT_PASSWORD_FILE environment variable are also supported.
+VAULT_FILE ?= $(ANSIBLE_VAULT_PASSWORD_FILE)
+VAULT_PASSWORD_FILE ?= $(VAULT_FILE)
+VAULT_ARGS = $(if $(strip $(VAULT_PASSWORD_FILE)),--vault-password-file $(VAULT_PASSWORD_FILE),)
+ifneq ($(strip $(VAULT_PASSWORD_FILE)),)
+export ANSIBLE_VAULT_PASSWORD_FILE := $(VAULT_PASSWORD_FILE)
+endif
 
 #########
 # Setup #
