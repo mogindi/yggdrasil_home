@@ -193,6 +193,17 @@ vagrant-destroy:
 # print make vars. Use like this "make print-ENV" to print ENV 
 print-%  : ; @echo $* = $($*)
 
+secret-encrypt:
+	export ANSIBLE_VAULT_PASSWORD_FILE=~/.ansible_vault && \
+	echo -n '$(SECRET_VALUE)' | ansible-vault encrypt_string --stdin-name $(SECRET_KEY) 2>/dev/null
+
+secret-decrypt:
+	export ANSIBLE_VAULT_PASSWORD_FILE=~/.ansible_vault && \
+	yq .$(SECRET_KEY) ./ansible/inventory/aio/group_vars/all/secrets.yaml | ansible-vault decrypt 2>/dev/null; echo
+
+
+
+
 # ping nodes
 ping-nodes:
 	scripts/ping-nodes.sh
