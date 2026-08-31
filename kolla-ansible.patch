@@ -218,7 +218,7 @@ index 8d3dcdcfd..a69d50561 100644
 --- a/ansible/roles/neutron/defaults/main.yml
 +++ b/ansible/roles/neutron/defaults/main.yml
 @@ -162,0 +163 @@ neutron_services:
-+    group_add: "{{ [neutron_docker_socket_gid] if neutron_agents_wrappers | bool and kolla_container_engine == 'docker' else [] }}"
++    group_add: "{{ [neutron_docker_socket_gid] if neutron_agents_wrappers | bool and kolla_container_engine == 'docker' and neutron_docker_socket_gid is defined else [] }}"
 diff --git a/ansible/roles/neutron/handlers/main.yml b/ansible/roles/neutron/handlers/main.yml
 index 454db95d2..2bbeda66b 100644
 --- a/ansible/roles/neutron/handlers/main.yml
