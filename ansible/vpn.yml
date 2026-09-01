@@ -10,12 +10,13 @@
       changed_when: false
       register: docker_ps_peervpn
 
-    - name: Generate random password string on first node
-      set_fact:
-        vpn_key: "{{ lookup('password', '/dev/null chars=ascii_letters,digit length=24') }}"
-      when: docker_ps_peervpn.rc != 0
+    - name: Validate vaulted VPN key
+      ansible.builtin.assert:
+        that:
+          - vpn_key is defined
+          - (vpn_key | string | trim | length) >= 24
+        fail_msg: "Define vpn_key in the encrypted Ansible secrets for this inventory."
       no_log: true
-      when: inventory_hostname == groups['deployment_nodes'][0]
 
     - name: initialize vpn peers list
       set_fact:
@@ -40,7 +41,7 @@
           -e VPN_CIDR={{ vpn_ip | ansible.utils.ipaddr('prefix') }} \
           -e VPN_PORT={{ vpn_port }} \
           -e VPN_INTERFACE={{ vpn_interface }} \
-          -e VPN_KEY={{ hostvars[groups['deployment_nodes'][0]].vpn_key }} \
+          -e VPN_KEY={{ vpn_key | quote }} \
           {% if vpn_peers is defined and vpn_peers | length > 0 %}
           -e VPN_PEERS="{% for peer in vpn_peers %}{{ peer + ':' + (vpn_port | string) }} {% endfor %}" \
           {% endif %}
@@ -48,6 +49,7 @@
           --restart always \
           thedrhax/peervpn
       when: docker_ps_peervpn.rc != 0
+      no_log: true
 
     - name: Wait for vpn to come up
       pause:

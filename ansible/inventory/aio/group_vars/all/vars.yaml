@@ -89,9 +89,8 @@ openstack_ceph_rgw_hosts:
   - host: "{{ lookup('ansible.builtin.pipe', 'hostname') }}"
     ip: "{{ lookup('ansible.builtin.pipe', 'ip --json address show ceph_public | jq -r .[0].addr_info[0].local') }}"
     port: 6780
-# Cinder uses the root RadosGW S3 endpoint for volume backups.  The
-# playbook creates the access secret in RGW and writes it to the generated
-# Kolla globals.d configuration; no secret belongs in inventory.
+# Cinder uses the root RadosGW S3 endpoint for volume backups. The access
+# secret is kept in the encrypted group_vars/all/secrets.yaml file.
 openstack_cinder_backup_s3_user: cinder-backup
 openstack_cinder_backup_s3_access_key: CINDERBACKUP
 openstack_cinder_backup_s3_bucket: cinder-backups

@@ -266,8 +266,8 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
    - DNS forwarders (`openstack_designate_forwarders_*`),
    - `openstack_ceph_rgw_hosts` values,
    - the RadosGW Cinder backup settings (`openstack_cinder_backup_s3_*`);
-     leave the secret unset to have the RGW initialization playbook generate
-     it,
+     keep `openstack_cinder_backup_s3_secret_key` in the encrypted
+     `group_vars/all/secrets.yaml`,
    - any environment-specific quotas and worker counts.
    - Nova utilization-aware scheduling is enabled by default with
      `cpu.virt_driver` and `cpu.percent=-1.0`. Override these with
