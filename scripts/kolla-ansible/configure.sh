@@ -355,6 +355,7 @@ openstack:
     clustering: senlin
     messaging: zaqar
     metric: gnocchi
+    workflowv2: mistral
     volumev3: cinder
 EOF
 
