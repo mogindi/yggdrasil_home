@@ -97,3 +97,56 @@ metrics:
       aggregation_method: mean
       resource_type: ceph_account
       force_granularity: 600
+
+  manila.share.size:
+    unit: GiB
+    groupby:
+      - id
+      - user_id
+      - project_id
+    metadata:
+      - name
+      - protocol
+      - availability_zone
+      - status
+    extra_args:
+      aggregation_method: mean
+      resource_type: manila_share
+      force_granularity: 600
+
+  volume.backup.size:
+    unit: GiB
+    groupby:
+      - id
+      - user_id
+      - project_id
+    extra_args:
+      aggregation_method: mean
+      resource_type: volume
+      force_granularity: 600
+
+  volume.snapshot.size:
+    unit: GiB
+    groupby:
+      - id
+      - project_id
+    metadata:
+      - name
+      - status
+    extra_args:
+      aggregation_method: mean
+      resource_type: yggdrasil_volume_snapshot
+      force_granularity: 600
+
+  octavia.loadbalancer:
+    unit: loadbalancer
+    groupby:
+      - id
+      - project_id
+    metadata:
+      - name
+      - status
+    extra_args:
+      aggregation_method: mean
+      resource_type: yggdrasil_loadbalancer
+      force_granularity: 600
