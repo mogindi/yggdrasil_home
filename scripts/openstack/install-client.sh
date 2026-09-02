@@ -32,7 +32,8 @@ pip install -U -c https://releases.openstack.org/constraints/upper/$OPENSTACK_RE
   python-octaviaclient \
   python-barbicanclient \
   python-freezerclient==6.1.0 \
-  python-senlinclient
+  python-senlinclient \
+  python-masakariclient
 
 # python-senlinclient still supplies legacy formatter callables while the
 # 2025.2 osc-lib release only accepts FormattableColumn classes.

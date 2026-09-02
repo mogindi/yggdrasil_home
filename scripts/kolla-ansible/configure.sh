@@ -115,7 +115,10 @@ set_global_config enable_kuryr yes
 set_global_config enable_magnum yes
 set_global_config enable_manila yes
 set_global_config enable_manila_backend_generic yes
-#set_global_config enable_masakari yes  # hacluster must be enabled - but this is an aio
+# Masakari's host monitor depends on Kolla's HA cluster services.  Keep both
+# enabled so the Instance-HA API and monitor are available in the AIO cloud.
+set_global_config enable_hacluster yes
+set_global_config enable_masakari yes
 set_global_config enable_mistral yes
 
 # Mistral creates a Keystone trust when a cron trigger is provisioned.  Its
@@ -362,6 +365,7 @@ openstack:
     alarming: aodh
     backup: freezer
     clustering: senlin
+    instance-ha: masakari
     messaging: zaqar
     metric: gnocchi
     workflowv2: mistral
