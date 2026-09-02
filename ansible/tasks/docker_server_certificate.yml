@@ -4,6 +4,8 @@
     docker_server_pki_dir: "{{ docker_pki_root }}/servers/{{ docker_server_host }}"
     docker_server_management_ip: >-
       {{ hostvars[docker_server_host].network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}
+    docker_server_private_key: "{{ vars['docker_pki_server_private_key_' ~ docker_server_host] }}"
+  no_log: true
 
 - name: Create Docker server certificate directory
   file:
@@ -26,11 +28,14 @@
       subjectAltName = DNS:{{ docker_server_host }},IP:{{ docker_server_management_ip }}
   register: docker_server_extensions
 
-- name: Generate Docker server private key
-  command: >-
-    openssl genrsa -out {{ docker_server_pki_dir }}/key.pem 4096
-  args:
-    creates: "{{ docker_server_pki_dir }}/key.pem"
+- name: Install Docker server private key from Ansible Vault
+  ansible.builtin.copy:
+    dest: "{{ docker_server_pki_dir }}/key.pem"
+    owner: root
+    group: root
+    mode: '0600'
+    content: "{{ docker_server_private_key }}"
+  no_log: true
 
 - name: Check Docker server certificate lifetime
   command: >-

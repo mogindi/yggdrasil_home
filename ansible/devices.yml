@@ -34,11 +34,33 @@
             - "{{ docker_pki_root }}/client"
             - "{{ docker_pki_root }}/servers"
 
-        - name: Generate Docker CA private key
-          command: >-
-            openssl genrsa -out {{ docker_pki_root }}/ca-key.pem 4096
-          args:
-            creates: "{{ docker_pki_root }}/ca-key.pem"
+        - name: Validate vaulted Docker PKI private keys
+          ansible.builtin.assert:
+            that:
+              - docker_pki_ca_private_key is defined
+              - (docker_pki_ca_private_key | string | trim | length) > 0
+              - docker_pki_client_private_key is defined
+              - (docker_pki_client_private_key | string | trim | length) > 0
+            fail_msg: "Define the Docker CA and client private keys in encrypted Ansible secrets."
+          no_log: true
+
+        - name: Validate vaulted Docker server private keys
+          ansible.builtin.assert:
+            that:
+              - "'docker_pki_server_private_key_' ~ item in vars"
+              - (vars['docker_pki_server_private_key_' ~ item] | string | trim | length) > 0
+            fail_msg: "Define docker_pki_server_private_key_{{ item }} in encrypted Ansible secrets."
+          loop: "{{ groups['deployment_nodes'] }}"
+          no_log: true
+
+        - name: Install Docker CA private key from Ansible Vault
+          ansible.builtin.copy:
+            dest: "{{ docker_pki_root }}/ca-key.pem"
+            owner: root
+            group: root
+            mode: '0600'
+            content: "{{ docker_pki_ca_private_key }}"
+          no_log: true
 
         - name: Generate Docker CA certificate
           command: >-
@@ -61,11 +83,14 @@
               extendedKeyUsage = clientAuth
           register: docker_client_extensions
 
-        - name: Generate Docker client private key
-          command: >-
-            openssl genrsa -out {{ docker_pki_root }}/client/key.pem 4096
-          args:
-            creates: "{{ docker_pki_root }}/client/key.pem"
+        - name: Install Docker client private key from Ansible Vault
+          ansible.builtin.copy:
+            dest: "{{ docker_pki_root }}/client/key.pem"
+            owner: root
+            group: root
+            mode: '0600'
+            content: "{{ docker_pki_client_private_key }}"
+          no_log: true
 
         - name: Check Docker client certificate lifetime
           command: >-
