@@ -21,6 +21,7 @@
         regexp: '^\[hacluster-remote:children\]\ncompute\n\n'
         replace: ''
       when: groups['deployment_nodes'] | length == 1
+      tags: configure
 
     - name: Add inventory for deployment controller
       copy: 
