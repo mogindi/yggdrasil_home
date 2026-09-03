@@ -18,8 +18,8 @@
     - name: Avoid Pacemaker Remote on single-node AIO
       ansible.builtin.replace:
         path: "{{ playbook_dir }}/../workspace/inventory/99-openstack_groups"
-        regexp: '^\[hacluster-remote:children\]\ncompute\n\n'
-        replace: ''
+        regexp: '^(\[hacluster-remote:children\])\ncompute\n\n'
+        replace: '\1\n\n'
       when: groups['deployment_nodes'] | length == 1
       tags: configure
 
