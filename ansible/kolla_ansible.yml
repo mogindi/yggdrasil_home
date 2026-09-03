@@ -15,6 +15,13 @@
       environment:
         OPENSTACK_RELEASE: "{{ openstack_release }}"
 
+    - name: Avoid Pacemaker Remote on single-node AIO
+      ansible.builtin.replace:
+        path: "{{ playbook_dir }}/../workspace/inventory/99-openstack_groups"
+        regexp: '^\\[hacluster-remote:children\\]\\ncompute\\n\\n'
+        replace: ''
+      when: groups['deployment_nodes'] | length == 1
+
     - name: Add inventory for deployment controller
       copy: 
         dest: "{{ playbook_dir }}/../workspace/inventory/00-deployment"
