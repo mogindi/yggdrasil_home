@@ -55,6 +55,18 @@ rules=(
 )
 done
 
+if [[ -n ${ADDITIONAL_IPTABLE_RULES_FILE:-} ]]; then
+  if [[ ! -f $ADDITIONAL_IPTABLE_RULES_FILE ]]; then
+    echo "Additional iptables rules file does not exist: $ADDITIONAL_IPTABLE_RULES_FILE"
+    exit 1
+  fi
+
+  while IFS= read -r rule || [[ -n $rule ]]; do
+    [[ -z ${rule//[[:space:]]/} || $rule == \#* ]] && continue
+    rules+=( "$rule" )
+  done < "$ADDITIONAL_IPTABLE_RULES_FILE"
+fi
+
 set -x
 
 iptables --policy INPUT ACCEPT
@@ -63,7 +75,7 @@ iptables --flush INPUT
 
 
 for rule in "${rules[@]}"; do
-  (iptables-save | grep -q "$rule") || (echo "Adding rule \"$rule\"" && eval "iptables $rule")
+  (iptables-save | grep -q -- "$rule") || (echo "Adding rule \"$rule\"" && eval "iptables $rule")
 done
 
 iptables --policy INPUT DROP

@@ -114,6 +114,23 @@
       tags: copy_only
       register: copy_hardening
 
+    - name: Create Yggdrasil configuration directory
+      ansible.builtin.file:
+        path: /etc/yggdrasil
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+
+    - name: Install additional iptables rules
+      ansible.builtin.template:
+        src: additional_iptables_rules.j2
+        dest: /etc/yggdrasil/additional-iptables.rules
+        owner: root
+        group: root
+        mode: '0644'
+      register: additional_iptables_rules_file
+
     - name: Remove legacy rc.local file
       ansible.builtin.file:
         path: /etc/rc.local
@@ -157,7 +174,7 @@
       poll: 0
       register: start_security_services
       when:
-        - security_units.changed or copy_hardening.changed
+        - security_units.changed or copy_hardening.changed or additional_iptables_rules_file.changed
         - not ansible_check_mode
 
     - name: Wait until security services run is complete
@@ -168,7 +185,7 @@
       retries: 180
       delay: 10
       when:
-        - security_units.changed or copy_hardening.changed
+        - security_units.changed or copy_hardening.changed or additional_iptables_rules_file.changed
         - not ansible_check_mode
 
     - name: Ensure security services completed successfully
@@ -176,7 +193,7 @@
         that:
           - security_services_status.rc == 0
       when:
-        - security_units.changed or copy_hardening.changed
+        - security_units.changed or copy_hardening.changed or additional_iptables_rules_file.changed
         - not ansible_check_mode
 
     - name: Clean up async file
@@ -184,5 +201,5 @@
         jid: "{{ start_security_services.ansible_job_id }}"
         mode: cleanup
       when:
-        - security_units.changed or copy_hardening.changed
+        - security_units.changed or copy_hardening.changed or additional_iptables_rules_file.changed
         - not ansible_check_mode

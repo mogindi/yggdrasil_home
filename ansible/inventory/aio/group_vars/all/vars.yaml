@@ -11,6 +11,9 @@ network_openstack_mgmt_ip: "10.0.10.{{ last_ip_octet }}/24"
 network_ceph_public_ip: "10.0.50.{{ last_ip_octet }}/24"
 network_ceph_cluster_ip: "10.0.60.{{ last_ip_octet }}/24"
 
+# Complete iptables rules to apply to INPUT before its default DROP policy.
+network_additional_iptable_rules: []
+
 network_netplan_overrides_file:
   network:
     version: 2

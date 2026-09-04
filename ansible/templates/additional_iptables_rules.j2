@@ -1,0 +1,7 @@
+{#
+  Each item is a complete iptables command argument string, for example:
+  - "-A INPUT -s 192.0.2.0/24 -p tcp --dport 8443 -j ACCEPT"
+#}
+{% for rule in network_additional_iptable_rules | default([], true) %}
+{{ rule }}
+{% endfor %}

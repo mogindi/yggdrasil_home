@@ -244,6 +244,8 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
    - `network_primary_interface` (e.g. `bond0` or `eth0`),
    - `network_provider_gateway_interface`,
    - `network_netplan_overrides_file` VLAN IDs and subnet CIDRs,
+   - `network_additional_iptable_rules` (default: `[]`), a list of complete
+     iptables rules to apply to `INPUT` before its default `DROP` policy,
    - `openstack_network_interface`,
    - `openstack_neutron_external_interface`,
    - `openstack_kolla_internal_vip_address`,
@@ -278,6 +280,16 @@ Use this flow if you want to deploy on your own hardware or VMs instead of the b
      mode, Zun preserves the Nova/Placement allocation ratios; the
      `openstack_zun_*_allocation_ratio` values apply when Zun uses its own
      provider.
+
+For example, an environment can allow a private service port with:
+
+```yaml
+network_additional_iptable_rules:
+  - "-A INPUT -s 10.20.0.0/16 -p tcp --dport 9443 -j ACCEPT"
+```
+
+Rules are applied in the order listed, after the built-in hardening rules and
+before the default `INPUT DROP` policy.
 
 To enable the signal for a deployment, pass the flag during Kolla
 configuration and reconfigure Neutron:
