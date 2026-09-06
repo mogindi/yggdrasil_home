@@ -12,6 +12,7 @@ freezer_version="${FREEZER_VERSION:-17.0.0}"
 freezerclient_version="${FREEZERCLIENT_VERSION:-6.1.0}"
 openstack_release="${OPENSTACK_RELEASE:-2025.2}"
 constraints_url="https://releases.openstack.org/constraints/upper/${openstack_release}"
+constraints_url="${FREEZER_CONSTRAINTS_URL:-${constraints_url}}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 image_dir="${script_dir}/../kolla-ansible/freezer-images"
 
