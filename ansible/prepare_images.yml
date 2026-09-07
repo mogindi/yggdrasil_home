@@ -76,6 +76,20 @@
     - name: Set images fact
       set_fact:
         images:
+          - image: quay.io/openstack.kolla/nova-libvirt:{{ image_version }}
+            customize_marker: customize-nova-libvirt-start-v1.done
+            custom_cmds: |
+              cat > /usr/local/bin/kolla_nova_libvirt_start <<'EOF'
+              #!/bin/bash
+              set -euo pipefail
+
+              # Start virtlogd alongside libvirtd so instance console logs can rotate.
+              /usr/sbin/virtlogd &
+
+              # Keep libvirtd as the main process for the container.
+              exec /usr/sbin/libvirtd --listen
+              EOF
+              chmod 744 /usr/local/bin/kolla_nova_libvirt_start
           - image: quay.io/openstack.kolla/nova-novncproxy:{{ image_version }}
             custom_cmds: |
               sed -i '123i\ \ \ \ \ \ \ \ expected_protos.append(\"https\")' /var/lib/kolla/venv/lib/python3.10/site-packages/nova/console/websocketproxy.py
@@ -155,8 +169,24 @@
       set_fact:
         images:
           - image: quay.io/openstack.kolla/mariadb-server:{{ image_version }}
+            customize_marker: customize-mariadb-bootstrap-permissions-v1.done
             custom_cmds: |
               ln -sf /usr/bin/mariadb /usr/bin/mysql
+              sed -i '/^    mariadb-install-db /a\    chown -R mysql:mysql /var/lib/mysql' /usr/local/bin/kolla_extend_start
+          - image: quay.io/openstack.kolla/nova-libvirt:{{ image_version }}
+            customize_marker: customize-nova-libvirt-start-v1.done
+            custom_cmds: |
+              cat > /usr/local/bin/kolla_nova_libvirt_start <<'EOF'
+              #!/bin/bash
+              set -euo pipefail
+
+              # Start virtlogd alongside libvirtd so instance console logs can rotate.
+              /usr/sbin/virtlogd &
+
+              # Keep libvirtd as the main process for the container.
+              exec /usr/sbin/libvirtd --listen
+              EOF
+              chmod 744 /usr/local/bin/kolla_nova_libvirt_start
           - image: quay.io/openstack.kolla/nova-novncproxy:{{ image_version }}
             # TODO: Does I need to chown root:root below because I'm the image edits
             # This edits become node-specific so can't be shared image

@@ -639,6 +639,7 @@ index 0000000..55a681d
 +- name: Get container facts
 +  become: true
 +  kolla_container_facts:
++    action: get_containers
 +    container_engine: "{{ kolla_container_engine }}"
 +    name:
 +      - freezer_api
@@ -654,7 +655,7 @@ index 0000000..55a681d
 +    state: stopped
 +  when:
 +    - inventory_hostname in groups[freezer_services['freezer-api']['group']]
-+    - container_facts['freezer_api'] is not defined
++    - container_facts.containers['freezer_api'] is not defined
 diff --git a/ansible/roles/freezer/tasks/pull.yml b/ansible/roles/freezer/tasks/pull.yml
 new file mode 100644
 index 0000000..74911b0

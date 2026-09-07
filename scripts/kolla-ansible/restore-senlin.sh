@@ -14,6 +14,14 @@ git archive "${drop_commit}^" \
   ansible/roles/senlin \
   ansible/roles/common/templates/cron-logrotate-senlin.conf.j2 | tar -x
 
+# The restored role predates the current kolla_container_facts interface,
+# which requires an explicit action and returns matching containers under the
+# containers key.
+sed -i \
+  -e '/^  kolla_container_facts:$/a\    action: get_containers' \
+  -e "s/container_facts\\['senlin_api'\\]/container_facts.containers['senlin_api']/" \
+  ansible/roles/senlin/tasks/precheck.yml
+
 cat > ansible/group_vars/all/senlin.yml <<'EOF'
 enable_senlin: "no"
 senlin_internal_fqdn: "{{ kolla_internal_fqdn }}"
