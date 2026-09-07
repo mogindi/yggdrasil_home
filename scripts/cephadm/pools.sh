@@ -4,16 +4,32 @@
 
 set -xe
 
+if [ -z "${CEPHADM_IMAGE:-}" ]; then
+	printf '%s\n' 'CEPHADM_IMAGE must be set' >&2
+	exit 1
+fi
+
+cephadm_ceph() {
+	timeout 120s cephadm --image "$CEPHADM_IMAGE" shell -- "$@"
+}
+
+ensure_pool() {
+	if cephadm_ceph ceph osd pool get "$1" pg_num >/dev/null 2>&1; then
+		return
+	fi
+	cephadm_ceph ceph osd pool create "$1"
+}
+
 # create ceph pools
-ceph osd pool create volumes
-ceph osd pool create images
-ceph osd pool create backups
-ceph osd pool create vms
+ensure_pool volumes
+ensure_pool images
+ensure_pool backups
+ensure_pool vms
 
 # initialize pools
-rbd pool init volumes
-rbd pool init images
-rbd pool init backups
-rbd pool init vms
+cephadm_ceph rbd pool init volumes
+cephadm_ceph rbd pool init images
+cephadm_ceph rbd pool init backups
+cephadm_ceph rbd pool init vms
 
 touch /root/cephadm_pools.done
