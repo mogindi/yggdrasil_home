@@ -156,13 +156,15 @@ openstack-remove-test-resources:
 
 init: prepare-ansible
 
-infra-up: harden docker vpn devices-configure provider-gateway-vip checks cephadm-deploy 
+infra-up: harden docker vpn devices-configure provider-gateway-vip checks 
+
+ceph-up: cephadm-deploy 
 
 kollaansible-up: kollaansible-images kollaansible-prepare-full kollaansible-create-certs kollaansible-bootstrap kollaansible-prechecks kollaansible-deploy kollaansible-lma
 
 postdeploy-up: kollaansible-postdeploy openstack-client-install openstack-resources-init symlink-etc-kolla openstack-services
 
-all-up: infra-up kollaansible-up postdeploy-up
+all-up: infra-up ceph-up kollaansible-up postdeploy-up
 
 all-upgrade: kollaansible-upgrade
 

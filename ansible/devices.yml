@@ -398,11 +398,22 @@
             path: "/opt/kata-{{ kata_version }}"
             state: directory
             mode: '0755'
+          
+        - name: Check for incorrectly nested Kata release
+          stat:
+            path: "/opt/kata-{{ kata_version }}/kata/bin/kata-runtime"
+          register: kata_nested_runtime
+
+        - name: Remove incorrectly nested Kata release
+          file:
+            path: "/opt/kata-{{ kata_version }}/kata"
+            state: absent
+          when: kata_nested_runtime.stat.exists
 
         - name: Extract Kata static release
           command: >-
             tar --zstd -xf /var/cache/kata-static-{{ kata_version }}-{{ kata_release_arch }}.tar.zst
-            -C /opt/kata-{{ kata_version }} --strip-components=2
+            -C /opt/kata-{{ kata_version }} --strip-components=3
           args:
             creates: "/opt/kata-{{ kata_version }}/bin/kata-runtime"
 
