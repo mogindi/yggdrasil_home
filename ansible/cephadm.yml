@@ -34,6 +34,7 @@
   vars:
     ceph_image_registry: quay.io/ceph/ceph
     ceph_image_track: v19
+    ceph_rgw_frontend_port: "{{ storage_ceph_rgw_frontend_port | default(6780) }}"
   tasks:
     - name: Read the latest Squid Ceph client version from the release image
       command: >-
@@ -89,6 +90,9 @@
           osd_pool_default_size = {{ storage_ceph_default_pool_size }}
           osd_pool_default_min_size = {{ storage_ceph_default_min_pool_size }}
           bdev_enable_discard = {{ storage_ceph_osd_discard | default(false) | bool | ternary('true', 'false') }}
+          {% if storage_ceph_no_redundancy_warning | default(false) | bool %}
+          mon_warn_on_pool_no_redundancy = false
+          {% endif %}
 
           public_network = {{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}
           cluster_network = {{ network_ceph_public_ip | ansible.utils.ipaddr('network/prefix') }}
@@ -149,6 +153,11 @@
       command: "{{ ceph_cli }} fsid"
       register: ceph_cluster_fsid
       changed_when: false
+
+    - name: Disable the no-redundancy warning for development Ceph pools
+      command: "{{ ceph_cli }} config set mon mon_warn_on_pool_no_redundancy false"
+      changed_when: false
+      when: storage_ceph_no_redundancy_warning | default(false) | bool
 
     - name: Get cephadm ssh public key
       command: "{{ ceph_cli }} cephadm get-pub-key"
@@ -275,6 +284,35 @@
         (ceph_osd_stat.stdout | from_json).num_in_osds | int >= expected_osd_devices | int
       when: expected_osd_devices | int > 0
 
+    - name: Read the existing RGW daemon state
+      command: "{{ ceph_cli }} orch ps --service_name rgw.foo --format json"
+      register: ceph_existing_rgw_daemons
+      changed_when: false
+      failed_when: false
+
+    - name: Determine whether RGW needs a fresh port check
+      set_fact:
+        ceph_rgw_running: >-
+          {{ ceph_existing_rgw_daemons.rc == 0 and
+             ((ceph_existing_rgw_daemons.stdout | default('[]', true) | from_json |
+               selectattr('status_desc', 'equalto', 'running') | list | length) > 0) }}
+
+    - name: Check whether the local Kolla HAProxy service is running
+      command: systemctl is-active --quiet kolla-haproxy-container.service
+      register: ceph_haproxy_state
+      changed_when: false
+      failed_when: false
+      when: not ceph_rgw_running
+
+    - name: Temporarily stop HAProxy for the initial RGW port check
+      ansible.builtin.systemd:
+        name: kolla-haproxy-container.service
+        state: stopped
+      register: ceph_haproxy_stop
+      when:
+        - not ceph_rgw_running
+        - ceph_haproxy_state.rc == 0
+
     - name: Create rgw config file
       copy:
         dest: /tmp/rgw.yml
@@ -287,13 +325,43 @@
           networks:
           - {{ network_ceph_public_ip | ansible.utils.ipaddr('network') }}/{{ network_ceph_public_ip | ansible.utils.ipaddr('prefix') }}
           spec:
-            rgw_frontend_port: 6780
+            rgw_frontend_type: beast
+            rgw_frontend_port: {{ ceph_rgw_frontend_port }}
 
-    - name: Add rgw
-      command: >-
-        cephadm --image {{ ceph_image }} shell
-        --mount /tmp/rgw.yml
-        -- ceph orch apply -i /mnt/rgw.yml
+    - name: Deploy RGW on the Ceph public network
+      block:
+        - name: Add rgw
+          command: >-
+            cephadm --image {{ ceph_image }} shell
+            --mount /tmp/rgw.yml
+            -- ceph orch apply -i /mnt/rgw.yml
+
+        - name: Wait for RGW to run on the Ceph public network
+          command: "{{ ceph_cli }} orch ps --service_name rgw.foo --format json"
+          register: ceph_rgw_daemons
+          changed_when: false
+          retries: 30
+          delay: 5
+          until:
+            - ceph_rgw_daemons.rc == 0
+            - (ceph_rgw_daemons.stdout | from_json | selectattr('status_desc', 'equalto', 'running') | list | length) > 0
+
+        - name: Verify RGW listens on the Ceph public address
+          shell: >-
+            ss -ltnH '( sport = :{{ ceph_rgw_frontend_port }} )' |
+            awk '{print $4}' |
+            grep -Fx '{{ network_ceph_public_ip | ansible.utils.ipaddr('address') }}:{{ ceph_rgw_frontend_port }}'
+          register: ceph_rgw_listener
+          changed_when: false
+          retries: 12
+          delay: 5
+          until: ceph_rgw_listener.rc == 0
+      always:
+        - name: Restore HAProxy after the RGW port check
+          ansible.builtin.systemd:
+            name: kolla-haproxy-container.service
+            state: started
+          when: ceph_haproxy_stop.changed | default(false)
 
     - name: Enable ceph-exporter
       command: "{{ ceph_cli }} mgr module enable prometheus"

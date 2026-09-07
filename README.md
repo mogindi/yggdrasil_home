@@ -491,8 +491,9 @@ Below is a complete catalog of Make targets in this repo.
 - `symlink-etc-kolla` — symlinks `workspace/etc/kolla/*` into `/etc/kolla/`.
 - `openstack-octavia` — initializes Octavia resources.
 - `openstack-rgw` — initializes RGW resources and configures Cinder's S3
-  backup driver to use the root RadosGW endpoint at the internal VIP on port
-  `6780`. It creates a dedicated non-admin RGW S3 user and stores its generated
+  backup driver to use the root RadosGW endpoint at the internal VIP on the
+  configured `openstack_ceph_rgw_vip_port` (`6780` in AIO). It creates a
+  dedicated non-admin RGW S3 user and stores its generated
   secret only in the ignored Kolla `globals.d` configuration.
 - `openstack-magnum` — initializes Magnum resources.
 - `openstack-manila` — initializes Manila resources.

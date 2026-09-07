@@ -2,6 +2,8 @@
   hosts: deployment_controller
   any_errors_fatal: true
   vars:
+    ceph_image_registry: quay.io/ceph/ceph
+    ceph_image_track: v19
     # Cinder's S3 backup driver talks to the root RadosGW S3 API.  Keep these
     # values overridable per inventory, while making the default endpoint the
     # HAProxy VIP rather than the Swift compatibility URL.
@@ -9,10 +11,34 @@
     cinder_backup_s3_access_key: "{{ openstack_cinder_backup_s3_access_key | default('CINDERBACKUP') }}"
     cinder_backup_s3_bucket: "{{ openstack_cinder_backup_s3_bucket | default('cinder-backups') }}"
     cinder_backup_s3_endpoint_url: >-
-      {{ openstack_cinder_backup_s3_endpoint_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':6780') }}
+      {{ openstack_cinder_backup_s3_endpoint_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':' ~ (openstack_ceph_rgw_vip_port | default(6780))) }}
     cinder_backup_s3_configured_secret_key: "{{ openstack_cinder_backup_s3_secret_key }}"
     kolla_config_dir: "{{ playbook_dir }}/../../workspace/etc/kolla"
   tasks:
+    - name: Read the pinned Ceph client version from the release image
+      ansible.builtin.command: >-
+        cephadm --image {{ ceph_image_registry }}:{{ ceph_image_track }}
+        shell -- ceph --version
+      register: ceph_client_version
+      changed_when: false
+
+    - name: Derive the exact Ceph container image
+      ansible.builtin.set_fact:
+        ceph_version: "{{ (ceph_client_version.stdout | regex_findall('version ([0-9]+\\.[0-9]+\\.[0-9]+)')) | first }}"
+        cephadm_shell: "timeout 120s cephadm --image {{ ceph_image_registry }}:v{{ (ceph_client_version.stdout | regex_findall('version ([0-9]+\\.[0-9]+\\.[0-9]+)')) | first }} shell --"
+
+    - name: Require a valid pinned Ceph client image
+      ansible.builtin.assert:
+        that:
+          - ceph_client_version.rc == 0
+          - ceph_version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
+        fail_msg: "Could not determine an exact Ceph client version from: {{ ceph_client_version.stdout | default('') }}"
+
+    - name: Set pinned Ceph command paths
+      ansible.builtin.set_fact:
+        ceph_cli: "{{ cephadm_shell }} ceph"
+        radosgw_admin: "{{ cephadm_shell }} radosgw-admin"
+
     - name: Validate vaulted Cinder backup RGW secret
       ansible.builtin.assert:
         that:
@@ -22,7 +48,7 @@
       no_log: true
 
     - name: Get RGW clients
-      shell: ceph auth list | grep ^client.rgw
+      ansible.builtin.shell: "{{ ceph_cli }} auth list | grep '^client.rgw'"
       register: ceph_rgw_clients
       changed_when: false
 
@@ -34,55 +60,44 @@
 
         client_name=global
 
-        ceph config set $client_name rgw_keystone_api_version 3
-        ceph config set $client_name rgw_keystone_accepted_roles "admin,member"
-        ceph config set $client_name rgw_keystone_admin_user ceph_rgw
-        ceph config set $client_name rgw_keystone_admin_password $(grep -ir ceph_rgw /etc/kolla/passwords.yml | awk '{print $2}')
-        ceph config set $client_name rgw_keystone_admin_domain default
-        ceph config set $client_name rgw_keystone_admin_project service
-        ceph config set $client_name rgw_s3_auth_use_keystone true
-        ceph config set $client_name rgw_keystone_url $OS_AUTH_URL
-        ceph config set $client_name rgw_swift_account_in_url true  # used to namespace per project with "AUTH_%(project_id)s"
-        ceph config set $client_name rgw_swift_url_prefix swift  # this is used to add "/swift" in url, to distinguish from s3
+        {{ ceph_cli }} config set $client_name rgw_keystone_api_version 3
+        {{ ceph_cli }} config set $client_name rgw_keystone_accepted_roles "admin,member"
+        {{ ceph_cli }} config set $client_name rgw_keystone_admin_user ceph_rgw
+        {{ ceph_cli }} config set $client_name rgw_keystone_admin_password $(grep -ir ceph_rgw /etc/kolla/passwords.yml | awk '{print $2}')
+        {{ ceph_cli }} config set $client_name rgw_keystone_admin_domain default
+        {{ ceph_cli }} config set $client_name rgw_keystone_admin_project service
+        {{ ceph_cli }} config set $client_name rgw_s3_auth_use_keystone true
+        {{ ceph_cli }} config set $client_name rgw_keystone_url $OS_AUTH_URL
+        {{ ceph_cli }} config set $client_name rgw_swift_account_in_url true  # used to namespace per project with "AUTH_%(project_id)s"
+        {{ ceph_cli }} config set $client_name rgw_swift_url_prefix swift  # this is used to add "/swift", to distinguish from s3
 
         # TODO: Fix for when no an aio
         {% for rgw_client in ceph_rgw_clients.stdout_lines %}
         {% set node = rgw_client.split('.')[3] %}
-        ceph config set {{ rgw_client }} rgw_frontends "beast endpoint={{ hostvars[node].network_ceph_public_ip | ansible.utils.ipaddr('address') }}:6780"
+        {{ ceph_cli }} config set {{ rgw_client }} rgw_frontends "beast endpoint={{ hostvars[node].network_ceph_public_ip | ansible.utils.ipaddr('address') }}:{{ storage_ceph_rgw_frontend_port | default(6780) }}"
         {% endfor %}
 
     - name: Check for the Cinder backup RGW user
-      ansible.builtin.command:
-        argv:
-          - radosgw-admin
-          - user
-          - info
-          - "--uid={{ cinder_backup_s3_user }}"
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user info --uid={{ cinder_backup_s3_user }}
       register: cinder_backup_user_info
       changed_when: false
       failed_when: cinder_backup_user_info.rc not in [0, 22]
       no_log: true
 
     - name: Create the Cinder backup RGW user
-      ansible.builtin.command:
-        argv:
-          - radosgw-admin
-          - user
-          - create
-          - "--uid={{ cinder_backup_s3_user }}"
-          - "--display-name=Cinder volume backups"
-          - "--access-key={{ cinder_backup_s3_access_key }}"
-          - "--secret-key={{ cinder_backup_s3_configured_secret_key }}"
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user create
+        --uid={{ cinder_backup_s3_user }}
+        --display-name='Cinder volume backups'
+        --access-key={{ cinder_backup_s3_access_key }}
+        --secret-key={{ cinder_backup_s3_configured_secret_key }}
       when: cinder_backup_user_info.rc == 22
       no_log: true
 
     - name: Read the Cinder backup RGW user keys
-      ansible.builtin.command:
-        argv:
-          - radosgw-admin
-          - user
-          - info
-          - "--uid={{ cinder_backup_s3_user }}"
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user info --uid={{ cinder_backup_s3_user }}
       register: cinder_backup_user_info_after_create
       changed_when: false
       no_log: true
@@ -96,25 +111,18 @@
       no_log: true
 
     - name: Add the configured Cinder backup S3 access key
-      ansible.builtin.command:
-        argv:
-          - radosgw-admin
-          - key
-          - create
-          - "--uid={{ cinder_backup_s3_user }}"
-          - --key-type=s3
-          - "--access-key={{ cinder_backup_s3_access_key }}"
-          - "--secret-key={{ cinder_backup_s3_configured_secret_key }}"
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} key create
+        --uid={{ cinder_backup_s3_user }}
+        --key-type=s3
+        --access-key={{ cinder_backup_s3_access_key }}
+        --secret-key={{ cinder_backup_s3_configured_secret_key }}
       when: cinder_backup_s3_key | length == 0
       no_log: true
 
     - name: Read the final Cinder backup RGW user keys
-      ansible.builtin.command:
-        argv:
-          - radosgw-admin
-          - user
-          - info
-          - "--uid={{ cinder_backup_s3_user }}"
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user info --uid={{ cinder_backup_s3_user }}
       register: cinder_backup_user_info_final
       changed_when: false
       no_log: true
@@ -172,7 +180,7 @@
   any_errors_fatal: true
   vars:
     cinder_backup_s3_endpoint_url: >-
-      {{ openstack_cinder_backup_s3_endpoint_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':6780') }}
+      {{ openstack_cinder_backup_s3_endpoint_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':' ~ (openstack_ceph_rgw_vip_port | default(6780))) }}
     cinder_backup_s3_bucket: "{{ openstack_cinder_backup_s3_bucket | default('cinder-backups') }}"
   tasks:
     - name: Reconfigure Cinder with the RadosGW backup driver

@@ -87,6 +87,7 @@
         OPENSTACK_NETWORK_INTERFACE: "{{ openstack_network_interface }}"
         OPENSTACK_NEUTRON_EXTERNAL_INTERFACE: "{{ openstack_neutron_external_interface }}"
         OPENSTACK_KOLLA_INTERNAL_VIP_ADDRESS: "{{ openstack_kolla_internal_vip_address }}"
+        OPENSTACK_CEPH_RGW_VIP_PORT: "{{ openstack_ceph_rgw_vip_port | default(6780) }}"
         OPENSTACK_DESIGNATE_FORWARDERS_FIRST_ADDRESS: "{{ openstack_designate_forwarders_first_address }}"
         OPENSTACK_DESIGNATE_FORWARDERS_SECOND_ADDRESS: "{{ openstack_designate_forwarders_second_address }}"
         OPENSTACK_CEPH_RGW_HOSTS: "{{ openstack_ceph_rgw_hosts }}"

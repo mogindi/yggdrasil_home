@@ -12,6 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${OPENSTACK_ZUN_HOST_SHARED_WITH_NOVA:=true}"
 : "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED:=no}"
 : "${OPENSTACK_NETWORK_GUARD_ENABLED:=no}"
+: "${OPENSTACK_CEPH_RGW_VIP_PORT:=6780}"
 
 is_enabled() {
 	case "${1,,}" in
@@ -176,6 +177,7 @@ set_global_config cloudkitty_storage_backend opensearch
 
 set_global_config enable_ceph_rgw yes
 set_global_config ceph_rgw_hosts "$OPENSTACK_CEPH_RGW_HOSTS"
+set_global_config ceph_rgw_port "$OPENSTACK_CEPH_RGW_VIP_PORT"
 set_global_config ceph_rgw_swift_account_in_url yes  # used to namespace per project with "AUTH_%(project_id)s"
 set_global_config ceph_rgw_swift_compatibility no  # this is used to add "/swift/" in url, to distinguish from s3
 
