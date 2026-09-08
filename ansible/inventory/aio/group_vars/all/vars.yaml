@@ -93,6 +93,8 @@ kata_checksums:
 openstack_network_interface: openstack_mgmt
 openstack_neutron_external_interface: veth0
 openstack_kolla_internal_vip_address: 10.0.10.100
+# ML Lab sends project-scoped Heat requests to the internal API endpoint.
+yggdrasil_ml_lab_heat_url: "http://{{ openstack_kolla_internal_vip_address }}:8004/v1/{project_id}"
 openstack_designate_forwarders_first_address: 8.8.8.8
 openstack_designate_forwarders_second_address: 8.8.4.4
 openstack_ceph_rgw_hosts:
