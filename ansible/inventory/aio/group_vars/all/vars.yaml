@@ -95,6 +95,13 @@ openstack_neutron_external_interface: veth0
 openstack_kolla_internal_vip_address: 10.0.10.100
 # ML Lab sends project-scoped Heat requests to the internal API endpoint.
 yggdrasil_ml_lab_heat_url: "http://{{ openstack_kolla_internal_vip_address }}:8004/v1/{project_id}"
+# ML Lab provisions project notebooks from the marketplace template onto the
+# default AIO tenant network and exposes them through the shared public net.
+yggdrasil_ml_lab_notebook_template_url: "http://{{ openstack_kolla_internal_vip_address }}:8093/api/v1/templates/jupyterhub-nova"
+yggdrasil_ml_lab_notebook_image: "ubuntu-noble-24.04.20260908.x86_64"
+yggdrasil_ml_lab_notebook_flavor: "m1.medium"
+yggdrasil_ml_lab_notebook_network: "demo-net"
+yggdrasil_ml_lab_notebook_external_network: "public1"
 openstack_designate_forwarders_first_address: 8.8.8.8
 openstack_designate_forwarders_second_address: 8.8.4.4
 openstack_ceph_rgw_hosts:
