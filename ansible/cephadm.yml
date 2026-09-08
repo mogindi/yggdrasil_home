@@ -33,7 +33,7 @@
   any_errors_fatal: true
   vars:
     ceph_image_registry: quay.io/ceph/ceph
-    ceph_image_track: v19
+    ceph_image_track: v19.2.3
     ceph_rgw_frontend_port: "{{ storage_ceph_rgw_frontend_port | default(6780) }}"
   tasks:
     - name: Read the latest Squid Ceph client version from the release image
