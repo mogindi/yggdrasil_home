@@ -170,6 +170,8 @@ else
 	set_global_config zun_wsproxy_extra_volumes '[]'
 fi
 
+set_global_config rabbitmq_dimensions '{ "ulimits": { "nofile": { "soft": 65536, "hard": 524288 } } }'
+
 set_global_config octavia_provider_drivers '"amphora:Amphora provider, ovn:OVN provider"'
 set_global_config octavia_amp_network_cidr $OPENSTACK_AMPHORA_SUBNET_CIDR
 
