@@ -97,6 +97,13 @@
           or docker_daemon_json_configured.changed
           or (docker_legacy_api_override_removed.changed | default(false))
 
+    - name: Ensure Docker starts at boot
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: true
+        daemon_reload: true
+
     - name: Verify unauthenticated Docker API is disabled
       shell: "! ss -ltnH 'sport = :2375' | grep -q ."
       changed_when: false
