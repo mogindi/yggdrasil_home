@@ -1,4 +1,7 @@
 ---
+# Shared Ceph package and container image version.
+ceph_version: "19.2.3"
+
 last_ip_octet: "{{ inventory_index + 10 }}"
 
 vpn_ip: "10.84.0.{{ last_ip_octet }}/24"

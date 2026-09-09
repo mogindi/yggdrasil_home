@@ -1,0 +1,3 @@
+---
+# Shared Ceph package and container image version.
+ceph_version: "19.2.3"

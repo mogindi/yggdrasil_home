@@ -3,7 +3,7 @@
   any_errors_fatal: true
   vars:
     ceph_image_registry: quay.io/ceph/ceph
-    ceph_image_track: v19
+    ceph_image_track: "v{{ ceph_version }}"
     # Cinder's S3 backup driver talks to the root RadosGW S3 API.  Keep these
     # values overridable per inventory, while making the default endpoint the
     # HAProxy VIP rather than the Swift compatibility URL.
@@ -15,24 +15,27 @@
     cinder_backup_s3_configured_secret_key: "{{ openstack_cinder_backup_s3_secret_key }}"
     kolla_config_dir: "{{ playbook_dir }}/../../workspace/etc/kolla"
   tasks:
-    - name: Read the pinned Ceph client version from the release image
+    - name: Read the configured Ceph client version from the pinned image
       ansible.builtin.command: >-
         cephadm --image {{ ceph_image_registry }}:{{ ceph_image_track }}
         shell -- ceph --version
       register: ceph_client_version
       changed_when: false
 
-    - name: Derive the exact Ceph container image
+    - name: Derive the exact Ceph client version from the image
       ansible.builtin.set_fact:
-        ceph_version: "{{ (ceph_client_version.stdout | regex_findall('version ([0-9]+\\.[0-9]+\\.[0-9]+)')) | first }}"
-        cephadm_shell: "timeout 120s cephadm --image {{ ceph_image_registry }}:v{{ (ceph_client_version.stdout | regex_findall('version ([0-9]+\\.[0-9]+\\.[0-9]+)')) | first }} shell --"
+        ceph_client_version_number: "{{ (ceph_client_version.stdout | regex_findall('version ([0-9]+\\.[0-9]+\\.[0-9]+)')) | first }}"
+        cephadm_shell: "timeout 120s cephadm --image {{ ceph_image_registry }}:{{ ceph_image_track }} shell --"
 
-    - name: Require a valid pinned Ceph client image
+    - name: Require the pinned Ceph image to match the global version
       ansible.builtin.assert:
         that:
           - ceph_client_version.rc == 0
           - ceph_version is match('^[0-9]+\\.[0-9]+\\.[0-9]+$')
-        fail_msg: "Could not determine an exact Ceph client version from: {{ ceph_client_version.stdout | default('') }}"
+          - ceph_client_version_number == ceph_version
+        fail_msg: >-
+          The pinned Ceph image did not report the configured version
+          {{ ceph_version }}: {{ ceph_client_version.stdout | default('') }}
 
     - name: Set pinned Ceph command paths
       ansible.builtin.set_fact:
