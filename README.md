@@ -469,8 +469,8 @@ Below is a complete catalog of Make targets in this repo.
 ### OpenStack initialization targets
 
 - `openstack-client-install` — installs OpenStack client tooling.
-- `openstack-extra-roles` — ensures the project-scoped and service integration
-  roles used by Yggdrasil exist in Keystone. Override `OPENSTACK_EXTRA_ROLES`
+- `openstack-roles` — ensures the project-scoped and service integration
+  roles used by Yggdrasil exist in Keystone. Override `OPENSTACK_ROLES`
   to customize the space-separated role list.
 - `openstack-project-resources` — lists all resources visible to `PROJECT`,
   using the Python SDKs discovered from the endpoint catalog. Pass
