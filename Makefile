@@ -3,6 +3,14 @@ SHELL:=/bin/bash
 ENV = hetzner-vagrant-dev01
 ARGS = 
 TAGS = 
+# Keystone roles used by Yggdrasil's project-scoped policies and enabled
+# service integrations. Kolla creates many of the service roles itself, but
+# keeping the complete list here makes post-deploy role setup repeatable.
+OPENSTACK_EXTRA_ROLES ?= reader system_reader data_reader data_editor data_admin \
+	project_admin creator observer audit rating heat_stack_owner heat_stack_user \
+	load-balancer_observer load-balancer_global_observer \
+	load-balancer_member load-balancer_admin load-balancer_quota_admin \
+	key-manager:service-admin ResellerAdmin
 # Ansible vault password file is shared across environments.
 override VAULT_PASSWORD_FILE := $(HOME)/.ansible_vault
 ifeq ($(wildcard $(VAULT_PASSWORD_FILE)),)
@@ -88,6 +96,11 @@ alertmanager-pagerduty:
 openstack-client-install:
 	ansible-playbook ansible/client.yml $(VAULT_ARGS) $(ARGS)
 
+openstack-extra-roles: kollaansible-postdeploy openstack-client-install
+	OPENSTACK_KOLLA_WORKSPACE="$(CURDIR)/workspace" \
+	OPENSTACK_EXTRA_ROLES="$(OPENSTACK_EXTRA_ROLES)" \
+	scripts/openstack/ensure-extra-roles.sh
+
 openstack-project-resources:
 	@test -n "$(PROJECT)" || (echo "PROJECT is required, for example: make openstack-project-resources PROJECT=admin" >&2; exit 2)
 	@if [[ -f workspace/kolla-venv/bin/activate ]]; then source workspace/kolla-venv/bin/activate; fi; scripts/openstack/list-project-resources.py --project "$(PROJECT)" $(ARGS)
@@ -162,7 +175,7 @@ ceph-up: cephadm-deploy
 
 kollaansible-up: kollaansible-images kollaansible-prepare-full kollaansible-create-certs kollaansible-bootstrap kollaansible-prechecks kollaansible-deploy kollaansible-lma
 
-postdeploy-up: kollaansible-postdeploy openstack-client-install openstack-resources-init symlink-etc-kolla openstack-services
+postdeploy-up: kollaansible-postdeploy openstack-client-install openstack-extra-roles openstack-resources-init symlink-etc-kolla openstack-services
 
 all-up: infra-up ceph-up kollaansible-up postdeploy-up
 

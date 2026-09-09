@@ -469,6 +469,9 @@ Below is a complete catalog of Make targets in this repo.
 ### OpenStack initialization targets
 
 - `openstack-client-install` — installs OpenStack client tooling.
+- `openstack-extra-roles` — ensures the project-scoped and service integration
+  roles used by Yggdrasil exist in Keystone. Override `OPENSTACK_EXTRA_ROLES`
+  to customize the space-separated role list.
 - `openstack-project-resources` — lists all resources visible to `PROJECT`,
   using the Python SDKs discovered from the endpoint catalog. Pass
   `ARGS="--format json"` for machine-readable output; missing clients and list
@@ -607,7 +610,8 @@ normal unversioned service URL and the console uses its `/v2` API.
 - `init` — alias for `prepare-ansible`.
 - `infra-up` — runs `harden docker vpn devices-configure provider-gateway-vip checks cephadm-deploy`.
 - `kollaansible-up` — runs images + prepare + certs + bootstrap + prechecks + deploy + LMA.
-- `postdeploy-up` — runs post-deploy, client install, resources init, kolla symlink, and service initialization.
+- `postdeploy-up` — runs post-deploy, client install, extra-role setup,
+  resources init, kolla symlink, and service initialization.
 - `all-up` — full pipeline: `infra-up kollaansible-up postdeploy-up`.
 - `all-upgrade` — alias for `kollaansible-upgrade`.
 - `dev-up` — `vagrant-up` then `all-up`.
