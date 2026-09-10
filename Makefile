@@ -6,7 +6,7 @@ TAGS =
 # Keystone roles used by Yggdrasil's project-scoped policies and enabled
 # service integrations. Kolla creates many of the service roles itself, but
 # keeping the complete list here makes post-deploy role setup repeatable.
-OPENSTACK_ROLES ?= reader data_reader data_editor data_admin \
+OPENSTACK_ROLES ?= reader data_reader data_editor data_admin migration \
 	project_admin creator observer audit rating heat_stack_owner heat_stack_user \
 	load-balancer_observer load-balancer_global_observer \
 	load-balancer_member load-balancer_admin load-balancer_quota_admin \

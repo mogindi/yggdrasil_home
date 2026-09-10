@@ -28,7 +28,7 @@ source "$OPENSTACK_RC"
 if (($#)); then
   roles=("$@")
 else
-  read -r -a roles <<< "${OPENSTACK_ROLES:-data_reader data_editor data_admin project_admin}"
+  read -r -a roles <<< "${OPENSTACK_ROLES:-data_reader data_editor data_admin migration project_admin}"
 fi
 
 if ((${#roles[@]} == 0)); then
