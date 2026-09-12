@@ -1,0 +1,47 @@
+---
+# The cleanup playbook is deliberately inert unless both switches below are
+# set.  This makes an accidental invocation a read-only inventory/space check.
+free_disk_space_apply: false
+free_disk_space_confirm: false
+
+# Node-local cleanup.  The low-risk cache operations are enabled when
+# free_disk_space_apply is true.  Log and volume deletion require their own
+# opt-ins because they can remove operational or service state.
+free_disk_space_journal_vacuum: true
+free_disk_space_journal_vacuum_size: 500M
+free_disk_space_kolla_logrotate: true
+free_disk_space_host_log_cleanup: false
+free_disk_space_truncate_host_logs: false
+free_disk_space_docker_rotated_log_cleanup: false
+free_disk_space_docker_active_log_cleanup: false
+free_disk_space_docker_image_prune: true
+free_disk_space_docker_volume_prune: false
+free_disk_space_docker_builder_prune: true
+free_disk_space_package_cache_cleanup: true
+free_disk_space_remove_freebsd_artifacts: false
+
+# MariaDB cleanup runs on each deployment node because Galera binlogs are
+# local to each node.  It is disabled by default and additionally requires an
+# explicit confirmation that no asynchronous consumer still needs the logs.
+free_disk_space_mariadb_binlog_cleanup: false
+free_disk_space_mariadb_replication_confirmed: false
+free_disk_space_mariadb_binlog_retention_days: 7
+free_disk_space_mariadb_expected_cluster_size: "{{ groups['deployment_nodes'] | length }}"
+free_disk_space_mariadb_password_file: /etc/kolla/passwords.yml
+
+# OpenSearch cleanup is cluster-wide and runs once, on the first deployment
+# node.  Keep the endpoint inventory-derived rather than hard-coded.
+free_disk_space_opensearch_cleanup: false
+free_disk_space_opensearch_url: "http://{{ openstack_kolla_internal_vip_address | default('10.0.10.100') }}:9200"
+free_disk_space_opensearch_soft_retention_days: 3
+free_disk_space_opensearch_hard_retention_days: 7
+free_disk_space_opensearch_clear_read_only_indices: "flog-*"
+
+# Fluentd buffers are local to each node.  Discarding them intentionally loses
+# queued logs and therefore remains a separate opt-in.
+free_disk_space_discard_fluentd_retry: false
+free_disk_space_fluentd_volume: fluentd_data
+free_disk_space_fluentd_buffer_subdirectory: opensearch.buffer
+
+# An explicit opt-in is required for the most destructive Docker operations.
+free_disk_space_aggressive: false

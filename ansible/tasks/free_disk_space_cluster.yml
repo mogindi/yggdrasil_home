@@ -1,0 +1,234 @@
+---
+- name: Check OpenSearch cluster health
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/_cluster/health"
+    method: GET
+    return_content: true
+    timeout: 10
+    status_code: 200
+  register: free_disk_space_opensearch_health
+  changed_when: false
+  failed_when: false
+  when: free_disk_space_opensearch_cleanup | bool
+  tags:
+    - cluster
+    - opensearch
+
+- name: Report unavailable OpenSearch without failing node cleanup
+  ansible.builtin.debug:
+    msg: "OpenSearch is unavailable; cluster index cleanup skipped."
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) != 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Clear read-only blocks only from flog indices
+  ansible.builtin.uri:
+    url: >-
+      {{ free_disk_space_opensearch_url }}/{{ free_disk_space_opensearch_clear_read_only_indices
+      }}/_settings?expand_wildcards=open,closed
+    method: PUT
+    body_format: json
+    body:
+      index.blocks.read_only_allow_delete: null
+    timeout: 30
+    status_code: 200
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: List dated flog indices
+  ansible.builtin.uri:
+    url: >-
+      {{ free_disk_space_opensearch_url }}/_cat/indices/flog-*?expand_wildcards=open,closed&format=tsv&h=index
+    method: GET
+    return_content: true
+    timeout: 30
+    status_code: 200
+  register: free_disk_space_opensearch_index_list
+  changed_when: false
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Select only date-named flog indices
+  ansible.builtin.set_fact:
+    free_disk_space_opensearch_indices: >-
+      {{ free_disk_space_opensearch_index_list.content.splitlines()
+         | map('trim')
+         | select('match', '^flog-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}$')
+         | list }}
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: List open dated flog indices for the close phase
+  ansible.builtin.uri:
+    url: >-
+      {{ free_disk_space_opensearch_url }}/_cat/indices/flog-*?expand_wildcards=open&format=tsv&h=index
+    method: GET
+    return_content: true
+    timeout: 30
+    status_code: 200
+  register: free_disk_space_opensearch_open_index_list
+  changed_when: false
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Select open date-named flog indices
+  ansible.builtin.set_fact:
+    free_disk_space_opensearch_open_indices: >-
+      {{ free_disk_space_opensearch_open_index_list.content.splitlines()
+         | map('trim')
+         | select('match', '^flog-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}$')
+         | list }}
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Calculate OpenSearch retention cutoffs
+  ansible.builtin.command:
+    argv:
+      - date
+      - -u
+      - -d
+      - "today - {{ item.days }} days"
+      - +%s
+  loop:
+    - name: soft
+      days: "{{ free_disk_space_opensearch_soft_retention_days }}"
+    - name: hard
+      days: "{{ free_disk_space_opensearch_hard_retention_days }}"
+  register: free_disk_space_opensearch_cutoffs
+  changed_when: false
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Save OpenSearch retention cutoffs
+  ansible.builtin.set_fact:
+    free_disk_space_opensearch_soft_cutoff: >-
+      {{ (free_disk_space_opensearch_cutoffs.results
+          | selectattr('item.name', 'equalto', 'soft') | first).stdout | int }}
+    free_disk_space_opensearch_hard_cutoff: >-
+      {{ (free_disk_space_opensearch_cutoffs.results
+          | selectattr('item.name', 'equalto', 'hard') | first).stdout | int }}
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Calculate the date of every flog index
+  ansible.builtin.command:
+    argv:
+      - date
+      - -u
+      - -d
+      - "{{ item | regex_replace('^flog-', '') | replace('.', '-') }} 00:00:00"
+      - +%s
+  loop: "{{ free_disk_space_opensearch_indices | default([]) }}"
+  register: free_disk_space_opensearch_index_epochs
+  changed_when: false
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Delete flog indices past the hard retention cutoff
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/{{ item.item }}"
+    method: DELETE
+    timeout: 30
+    status_code:
+      - 200
+      - 404
+  loop: "{{ free_disk_space_opensearch_index_epochs.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+    - item.rc | default(1) == 0
+    - (item.stdout | int) < (free_disk_space_opensearch_hard_cutoff | int)
+  tags:
+    - cluster
+    - opensearch
+
+- name: Close flog indices past the soft retention cutoff
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/{{ item.item }}/_close"
+    method: POST
+    timeout: 30
+    status_code:
+      - 200
+      - 404
+  loop: "{{ free_disk_space_opensearch_index_epochs.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+    - item.rc | default(1) == 0
+    - (item.stdout | int) >= (free_disk_space_opensearch_hard_cutoff | int)
+    - (item.stdout | int) < (free_disk_space_opensearch_soft_cutoff | int)
+    - item.item in (free_disk_space_opensearch_open_indices | default([]))
+  tags:
+    - cluster
+    - opensearch
+
+- name: Flush flog indices after cleanup
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/flog-*/_flush"
+    method: POST
+    timeout: 60
+    status_code:
+      - 200
+      - 404
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Report cluster cleanup scope
+  ansible.builtin.debug:
+    msg:
+      - "OpenSearch cleanup was evaluated once on {{ inventory_hostname }}."
+      - "Endpoint: {{ free_disk_space_opensearch_url }}"
+      - "Dated flog indices found: {{ free_disk_space_opensearch_indices | default([]) }}"
+      - "Open flog indices found: {{ free_disk_space_opensearch_open_indices | default([]) }}"
+      - "Mutations enabled: {{ free_disk_space_apply | bool }}"
+  when: free_disk_space_opensearch_cleanup | bool
+  tags:
+    - cluster
+    - opensearch

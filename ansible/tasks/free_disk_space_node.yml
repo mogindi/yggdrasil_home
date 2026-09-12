@@ -1,0 +1,644 @@
+---
+- name: Record the node filesystem state
+  ansible.builtin.command: df -hT /
+  register: free_disk_space_node_before
+  changed_when: false
+  tags:
+    - node
+
+- name: Vacuum the systemd journal
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - "--vacuum-size={{ free_disk_space_journal_vacuum_size }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_journal_vacuum | bool
+  tags:
+    - node
+    - logs
+
+- name: List running Docker containers
+  ansible.builtin.command:
+    cmd: "docker ps --format '{% raw %}{{.Names}}{% endraw %}'"
+  register: free_disk_space_docker_names
+  changed_when: false
+  tags:
+    - node
+    - docker
+
+- name: Rotate Kolla service logs from the cron container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - cron
+      - logrotate
+      - -f
+      - /etc/logrotate.conf
+  register: free_disk_space_logrotate
+  failed_when: false
+  changed_when: free_disk_space_logrotate.rc == 0
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_kolla_logrotate | bool
+    - "'cron' in free_disk_space_docker_names.stdout_lines | default([])"
+  tags:
+    - node
+    - logs
+
+- name: Warn when the Kolla cron container is unavailable
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: cron container is not running; Kolla logrotate skipped"
+  when:
+    - free_disk_space_kolla_logrotate | bool
+    - "'cron' not in free_disk_space_docker_names.stdout_lines | default([])"
+  tags:
+    - node
+    - logs
+
+- name: Find rotated host logs within the host filesystem
+  ansible.builtin.command:
+    argv:
+      - find
+      - /var/log
+      - -xdev
+      - -type
+      - f
+      - "("
+      - -name
+      - "*.log.[0-9]*"
+      - -o
+      - -name
+      - "*.log.gz"
+      - ")"
+      - -print
+  register: free_disk_space_rotated_host_logs
+  changed_when: false
+  when: free_disk_space_host_log_cleanup | bool
+  tags:
+    - node
+    - logs
+
+- name: Show rotated host logs that would be removed
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: {{ free_disk_space_rotated_host_logs.stdout_lines | default([]) }}"
+  when: free_disk_space_host_log_cleanup | bool
+  tags:
+    - node
+    - logs
+
+- name: Remove rotated host logs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ free_disk_space_rotated_host_logs.stdout_lines | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_host_log_cleanup | bool
+  tags:
+    - node
+    - logs
+
+- name: Find current host logs that would be truncated
+  ansible.builtin.command:
+    argv:
+      - find
+      - /var/log
+      - -xdev
+      - -type
+      - f
+      - -name
+      - "*.log"
+      - -print
+  register: free_disk_space_current_host_logs
+  changed_when: false
+  when: free_disk_space_truncate_host_logs | bool
+  tags:
+    - node
+    - logs
+
+- name: Truncate current host logs
+  ansible.builtin.command:
+    argv:
+      - truncate
+      - -s
+      - "0"
+      - --
+      - "{{ item }}"
+  loop: "{{ free_disk_space_current_host_logs.stdout_lines | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_truncate_host_logs | bool
+  tags:
+    - node
+    - logs
+
+- name: Find rotated Docker JSON logs
+  ansible.builtin.command:
+    argv:
+      - find
+      - /var/lib/docker/containers
+      - -xdev
+      - -type
+      - f
+      - -name
+      - "*-json.log.[1-9]*"
+      - -print
+  register: free_disk_space_rotated_docker_logs
+  changed_when: false
+  failed_when: false
+  when: free_disk_space_docker_rotated_log_cleanup | bool
+  tags:
+    - node
+    - docker
+    - logs
+
+- name: Truncate rotated Docker JSON logs
+  ansible.builtin.command:
+    argv:
+      - truncate
+      - -s
+      - "0"
+      - --
+      - "{{ item }}"
+  loop: "{{ free_disk_space_rotated_docker_logs.stdout_lines | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_docker_rotated_log_cleanup | bool
+  tags:
+    - node
+    - docker
+    - logs
+
+- name: Find active Docker JSON logs for aggressive cleanup
+  ansible.builtin.command:
+    argv:
+      - find
+      - /var/lib/docker/containers
+      - -xdev
+      - -type
+      - f
+      - -name
+      - "*-json.log"
+      - -print
+  register: free_disk_space_active_docker_logs
+  changed_when: false
+  failed_when: false
+  when: (free_disk_space_docker_active_log_cleanup | bool) or (free_disk_space_aggressive | bool)
+  tags:
+    - node
+    - docker
+    - logs
+
+- name: Truncate active Docker JSON logs
+  ansible.builtin.command:
+    argv:
+      - truncate
+      - -s
+      - "0"
+      - --
+      - "{{ item }}"
+  loop: "{{ free_disk_space_active_docker_logs.stdout_lines | default([]) }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - free_disk_space_apply | bool
+    - (free_disk_space_docker_active_log_cleanup | bool) or (free_disk_space_aggressive | bool)
+  tags:
+    - node
+    - docker
+    - logs
+
+- name: Prune dangling Docker images
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - prune
+      - --force
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_docker_image_prune | bool
+    - not (free_disk_space_aggressive | bool)
+  tags:
+    - node
+    - docker
+
+- name: Prune all unused Docker images in aggressive mode
+  ansible.builtin.command:
+    argv:
+      - docker
+      - image
+      - prune
+      - --all
+      - --force
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_docker_image_prune | bool
+    - free_disk_space_aggressive | bool
+  tags:
+    - node
+    - docker
+
+- name: Prune Docker builder cache
+  ansible.builtin.command:
+    argv:
+      - docker
+      - builder
+      - prune
+      - --force
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_docker_builder_prune | bool
+  tags:
+    - node
+    - docker
+
+- name: Prune anonymous Docker volumes
+  ansible.builtin.command:
+    argv:
+      - docker
+      - volume
+      - prune
+      - --force
+  when:
+    - free_disk_space_apply | bool
+    - (free_disk_space_docker_volume_prune | bool) or (free_disk_space_aggressive | bool)
+    - not (free_disk_space_aggressive | bool)
+  tags:
+    - node
+    - docker
+
+- name: Prune all unused Docker volumes in aggressive mode
+  ansible.builtin.command:
+    argv:
+      - docker
+      - volume
+      - prune
+      - --all
+      - --force
+  when:
+    - free_disk_space_apply | bool
+    - (free_disk_space_docker_volume_prune | bool) or (free_disk_space_aggressive | bool)
+    - free_disk_space_aggressive | bool
+  tags:
+    - node
+    - docker
+
+- name: Clean the apt package cache
+  ansible.builtin.command: apt-get clean
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_package_cache_cleanup | bool
+  tags:
+    - node
+    - packages
+
+- name: Check whether npm is installed
+  ansible.builtin.command: npm --version
+  register: free_disk_space_npm
+  changed_when: false
+  failed_when: false
+  when: free_disk_space_package_cache_cleanup | bool
+  tags:
+    - node
+    - packages
+
+- name: Clean the npm cache
+  ansible.builtin.command:
+    argv:
+      - npm
+      - cache
+      - clean
+      - --force
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_package_cache_cleanup | bool
+    - free_disk_space_npm.rc | default(1) == 0
+  tags:
+    - node
+    - packages
+
+- name: Check whether pip is installed
+  ansible.builtin.command: pip --version
+  register: free_disk_space_pip
+  changed_when: false
+  failed_when: false
+  when: free_disk_space_package_cache_cleanup | bool
+  tags:
+    - node
+    - packages
+
+- name: Clean the pip cache
+  ansible.builtin.command:
+    argv:
+      - pip
+      - cache
+      - purge
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_package_cache_cleanup | bool
+    - free_disk_space_pip.rc | default(1) == 0
+  tags:
+    - node
+    - packages
+
+- name: Find Cypress cache contents
+  ansible.builtin.find:
+    paths: /root/.cache/Cypress
+    recurse: true
+    hidden: true
+    file_type: any
+  register: free_disk_space_cypress_cache
+  when:
+    - free_disk_space_package_cache_cleanup | bool
+  failed_when: false
+  tags:
+    - node
+    - packages
+
+- name: Remove Cypress cache contents
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ free_disk_space_cypress_cache.files | default([]) | sort(attribute='path', reverse=true) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_package_cache_cleanup | bool
+  tags:
+    - node
+    - packages
+
+- name: Find disposable Kata static archives
+  ansible.builtin.find:
+    paths: /var/cache
+    recurse: false
+    patterns: kata-static-*.tar.zst
+    file_type: file
+  register: free_disk_space_kata_archives
+  failed_when: false
+  when: free_disk_space_package_cache_cleanup | bool
+  tags:
+    - node
+    - packages
+
+- name: Remove disposable Kata static archives
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ free_disk_space_kata_archives.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_package_cache_cleanup | bool
+  tags:
+    - node
+    - packages
+
+- name: Find explicitly requested FreeBSD build artifacts
+  ansible.builtin.find:
+    paths: /root/yggdrasil_home/workspace
+    recurse: false
+    patterns:
+      - freebsd-RELEASE-*.raw
+      - freebsd-RELEASE-*.qcow2
+    file_type: file
+  register: free_disk_space_freebsd_artifacts
+  failed_when: false
+  when: free_disk_space_remove_freebsd_artifacts | bool
+  tags:
+    - node
+
+- name: Remove explicitly requested FreeBSD build artifacts
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ free_disk_space_freebsd_artifacts.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_remove_freebsd_artifacts | bool
+  tags:
+    - node
+
+- name: Find Ceph loop-backed image candidates without deleting them
+  ansible.builtin.find:
+    paths: /mnt
+    recurse: false
+    patterns: disk-*.img
+    file_type: file
+  register: free_disk_space_ceph_images
+  failed_when: false
+  tags:
+    - node
+    - ceph
+
+- name: Check whether Ceph image candidates are attached to a loop device
+  ansible.builtin.command:
+    argv:
+      - losetup
+      - -j
+      - "{{ item.path }}"
+  loop: "{{ free_disk_space_ceph_images.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: free_disk_space_ceph_loop_devices
+  changed_when: false
+  failed_when: false
+  tags:
+    - node
+    - ceph
+
+- name: Report Ceph image protection results
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.path }} is {{ 'attached and protected' if item.stdout else
+      'unattached; no deletion is performed' }}
+  loop: "{{ free_disk_space_ceph_loop_devices.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  tags:
+    - node
+    - ceph
+
+- name: Calculate the MariaDB binlog purge cutoff
+  ansible.builtin.command:
+    argv:
+      - date
+      - -u
+      - -d
+      - "-{{ free_disk_space_mariadb_binlog_retention_days }} days"
+      - "+%Y-%m-%d %H:%M:%S"
+  register: free_disk_space_mariadb_purge_before
+  changed_when: false
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_mariadb_binlog_cleanup | bool
+    - free_disk_space_mariadb_safe | default(false)
+  tags:
+    - node
+    - mariadb
+
+- name: Set MariaDB binlog expiry
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - -e
+      - "MYSQL_PWD={{ free_disk_space_mariadb_password }}"
+      - mariadb
+      - mariadb
+      - -uroot
+      - --batch
+      - --skip-column-names
+      - -e
+      - "SET GLOBAL binlog_expire_logs_seconds = {{ free_disk_space_mariadb_binlog_retention_days | int * 86400 }};"
+  no_log: true
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_mariadb_binlog_cleanup | bool
+    - free_disk_space_mariadb_safe | default(false)
+  tags:
+    - node
+    - mariadb
+
+- name: Purge old MariaDB binary logs
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - -e
+      - "MYSQL_PWD={{ free_disk_space_mariadb_password }}"
+      - mariadb
+      - mariadb
+      - -uroot
+      - --batch
+      - --skip-column-names
+      - -e
+      - "PURGE BINARY LOGS BEFORE '{{ free_disk_space_mariadb_purge_before.stdout }}';"
+  no_log: true
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_mariadb_binlog_cleanup | bool
+    - free_disk_space_mariadb_safe | default(false)
+  tags:
+    - node
+    - mariadb
+
+- name: Inspect the local Fluentd volume when retry discard is enabled
+  ansible.builtin.command:
+    cmd: "docker volume inspect --format '{% raw %}{{.Mountpoint}}{% endraw %}' {{ free_disk_space_fluentd_volume }}"
+  register: free_disk_space_fluentd_mountpoint
+  changed_when: false
+  failed_when: false
+  when: free_disk_space_discard_fluentd_retry | bool
+  tags:
+    - node
+    - fluentd
+
+- name: Find Fluentd retry records
+  ansible.builtin.find:
+    paths: "{{ free_disk_space_fluentd_mountpoint.stdout }}/{{ free_disk_space_fluentd_buffer_subdirectory }}"
+    recurse: false
+    patterns: "*.log"
+    file_type: file
+  register: free_disk_space_fluentd_retry_files
+  failed_when: false
+  when:
+    - free_disk_space_discard_fluentd_retry | bool
+    - free_disk_space_fluentd_mountpoint.rc | default(1) == 0
+  tags:
+    - node
+    - fluentd
+
+- name: Check that the Fluentd retry buffer exists before mutation
+  ansible.builtin.stat:
+    path: "{{ free_disk_space_fluentd_mountpoint.stdout }}/{{ free_disk_space_fluentd_buffer_subdirectory }}"
+  register: free_disk_space_fluentd_buffer
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_discard_fluentd_retry | bool
+    - free_disk_space_fluentd_mountpoint.rc | default(1) == 0
+  tags:
+    - node
+    - fluentd
+
+- name: Refuse Fluentd retry discard when its buffer is unavailable
+  ansible.builtin.assert:
+    that:
+      - free_disk_space_fluentd_mountpoint.rc | default(1) == 0
+      - free_disk_space_fluentd_mountpoint.stdout | default('') | length > 0
+      - free_disk_space_fluentd_buffer.stat.isdir | default(false)
+    fail_msg: >-
+      Refusing to discard Fluentd retry records on {{ inventory_hostname }}:
+      fluentd_data/opensearch.buffer was not found.
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_discard_fluentd_retry | bool
+    - not ansible_check_mode
+  tags:
+    - node
+    - fluentd
+
+- name: Discard Fluentd retry records while guaranteeing service recovery
+  block:
+    - name: Stop Fluentd before discarding retry records
+      ansible.builtin.command: docker stop fluentd
+      register: free_disk_space_fluentd_stop
+      changed_when: free_disk_space_fluentd_stop.rc == 0
+      when: "'fluentd' in free_disk_space_docker_names.stdout_lines | default([])"
+
+    - name: Discard queued Fluentd retry records
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ free_disk_space_fluentd_retry_files.files | default([]) }}"
+      loop_control:
+        label: "{{ item.path }}"
+  always:
+    - name: Restart Fluentd if this node had it running
+      ansible.builtin.command: docker start fluentd
+      when:
+        - free_disk_space_fluentd_stop is defined
+        - free_disk_space_fluentd_stop.rc | default(1) == 0
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_discard_fluentd_retry | bool
+  tags:
+    - node
+    - fluentd
+
+- name: Show the filesystem state after node cleanup
+  ansible.builtin.command: df -hT /
+  register: free_disk_space_node_after
+  changed_when: false
+  tags:
+    - node
+
+- name: Show Docker disk state after node cleanup
+  ansible.builtin.command: docker system df
+  register: free_disk_space_docker_after
+  changed_when: false
+  failed_when: false
+  tags:
+    - node
+    - docker
+
+- name: Report node cleanup result
+  ansible.builtin.debug:
+    msg:
+      - "{{ inventory_hostname }} before: {{ free_disk_space_node_before.stdout_lines | default([]) | join(' ') }}"
+      - "{{ inventory_hostname }} after: {{ free_disk_space_node_after.stdout_lines | default([]) | join(' ') }}"
+  tags:
+    - node

@@ -96,6 +96,9 @@ alertmanager-pagerduty:
 openstack-client-install:
 	ansible-playbook ansible/client.yml $(VAULT_ARGS) $(ARGS)
 
+free-disk-space:
+	ansible-playbook ansible/free_disk_space.yml $(VAULT_ARGS) $(ARGS)
+
 openstack-roles: kollaansible-postdeploy openstack-client-install
 	OPENSTACK_KOLLA_WORKSPACE="$(CURDIR)/workspace" \
 	OPENSTACK_ROLES="$(OPENSTACK_ROLES)" \

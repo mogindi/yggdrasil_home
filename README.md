@@ -407,6 +407,50 @@ Production notes:
 
 ---
 
+## Disk cleanup
+
+Use `ansible/free_disk_space.yml` for disk cleanup across a multi-node
+inventory. It targets only `deployment_nodes`, processes node-local work with
+`serial: 1`, and evaluates the OpenSearch cleanup once for the cluster. The
+playbook is read-only by default:
+
+The older `scripts/openstack/ops/free_disk_space.sh` remains a single-host
+compatibility helper and does not read Ansible inventory.
+
+```bash
+make free-disk-space ENV=my-private-cloud
+```
+
+To apply the baseline node cleanup (journal, Kolla log rotation, dangling
+images, builder cache, and package caches), explicitly enable mutations:
+
+```bash
+make free-disk-space ENV=my-private-cloud \
+  ARGS='-e free_disk_space_apply=true -e free_disk_space_confirm=true'
+```
+
+Higher-impact operations remain separate opt-ins:
+
+- `free_disk_space_host_log_cleanup=true` and
+  `free_disk_space_truncate_host_logs=true` remove or truncate host logs.
+- `free_disk_space_docker_rotated_log_cleanup=true` truncates rotated Docker
+  JSON logs.
+- `free_disk_space_docker_volume_prune=true` prunes anonymous volumes;
+  `free_disk_space_aggressive=true` also prunes named volumes, active Docker
+  logs, and all unused images.
+- `free_disk_space_mariadb_binlog_cleanup=true` additionally requires
+  `free_disk_space_mariadb_replication_confirmed=true`; the playbook checks
+  that every Galera node is synced and the cluster has the expected size.
+- `free_disk_space_opensearch_cleanup=true` deletes/closes dated `flog-*`
+  indices once, using the inventory's `openstack_kolla_internal_vip_address`.
+- `free_disk_space_discard_fluentd_retry=true` discards queued logs on each
+  node and restarts Fluentd even if deletion fails.
+
+Store `free_disk_space_mariadb_root_password` in an encrypted vars file and
+pass it with `-e @file.yml` when the controller's `/etc/kolla/passwords.yml`
+is unavailable. Review the plan and inventory before enabling any destructive
+option.
+
 ## LMA alerts and PagerDuty integration
 
 Deploy full LMA bundle:
@@ -469,6 +513,8 @@ Below is a complete catalog of Make targets in this repo.
 ### OpenStack initialization targets
 
 - `openstack-client-install` — installs OpenStack client tooling.
+- `free-disk-space` — runs the guarded, multi-node disk cleanup playbook;
+  node-local work is serialized and OpenSearch cleanup runs once per cluster.
 - `openstack-roles` — ensures the project-scoped and service integration
   roles used by Yggdrasil exist in Keystone. Override `OPENSTACK_ROLES`
   to customize the space-separated role list.

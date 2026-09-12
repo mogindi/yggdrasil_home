@@ -1,0 +1,127 @@
+---
+# Free disk space while keeping node-local and cluster-wide operations
+# separate.  Run from the deployment controller with the selected inventory:
+#
+#   ansible-playbook ansible/free_disk_space.yml
+#
+# The default is a read-only plan.  To apply the low-risk node cleanup, pass:
+#
+#   -e free_disk_space_apply=true -e free_disk_space_confirm=true
+#
+# See README.md for the opt-ins that enable log, volume, MariaDB, OpenSearch,
+# and Fluentd deletion.
+
+- name: Load shared Kolla credentials for optional MariaDB cleanup
+  hosts: deployment_controller
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - vars/free_disk_space.yml
+  tasks:
+    - name: Check for the controller Kolla password file
+      ansible.builtin.stat:
+        path: "{{ free_disk_space_mariadb_password_file }}"
+      register: free_disk_space_controller_password_file
+      when: free_disk_space_mariadb_binlog_cleanup | bool
+
+    - name: Read the controller Kolla password file without logging its contents
+      ansible.builtin.slurp:
+        src: "{{ free_disk_space_mariadb_password_file }}"
+      register: free_disk_space_controller_password_file_contents
+      no_log: true
+      when:
+        - free_disk_space_mariadb_binlog_cleanup | bool
+        - free_disk_space_controller_password_file.stat.exists | default(false)
+
+    - name: Keep the shared Kolla passwords available to node tasks
+      ansible.builtin.set_fact:
+        free_disk_space_kolla_passwords: >-
+          {{ free_disk_space_controller_password_file_contents.content
+             | b64decode | from_yaml }}
+      no_log: true
+      when:
+        - free_disk_space_mariadb_binlog_cleanup | bool
+        - free_disk_space_controller_password_file_contents.content is defined
+
+- name: Validate cleanup scope and show node state
+  hosts: deployment_nodes
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - vars/free_disk_space.yml
+  tasks:
+    - name: Validate the inventory and destructive-operation guard
+      ansible.builtin.assert:
+        that:
+          - groups['deployment_nodes'] | length > 0
+          - not (free_disk_space_apply | bool) or (free_disk_space_confirm | bool)
+          - not (free_disk_space_aggressive | bool) or (free_disk_space_apply | bool)
+          - free_disk_space_opensearch_soft_retention_days | int >= 0
+          - free_disk_space_opensearch_hard_retention_days | int >= free_disk_space_opensearch_soft_retention_days | int
+          - free_disk_space_mariadb_binlog_retention_days | int >= 1
+        fail_msg: >-
+          Refusing cleanup: use a non-empty deployment_nodes group and pass
+          free_disk_space_apply=true together with
+          free_disk_space_confirm=true for any mutation.
+      run_once: true
+
+    - name: Show the filesystem state before cleanup
+      ansible.builtin.command: df -hT /
+      register: free_disk_space_before
+      changed_when: false
+
+    - name: Show the node cleanup plan
+      ansible.builtin.debug:
+        msg:
+          - "{{ inventory_hostname }}: {{ free_disk_space_before.stdout_lines | default([]) | join(' ') }}"
+          - "apply={{ free_disk_space_apply | bool }}"
+          - "host_log_cleanup={{ free_disk_space_host_log_cleanup | bool }}"
+          - "truncate_host_logs={{ free_disk_space_truncate_host_logs | bool }}"
+          - "docker_volume_prune={{ free_disk_space_docker_volume_prune | bool }}"
+          - "mariadb_binlog_cleanup={{ free_disk_space_mariadb_binlog_cleanup | bool }}"
+          - "fluentd_retry_discard={{ free_disk_space_discard_fluentd_retry | bool }}"
+
+    - name: Preflight MariaDB on every node before any purge
+      ansible.builtin.include_tasks:
+        file: tasks/free_disk_space_mariadb_preflight.yml
+      when: free_disk_space_mariadb_binlog_cleanup | bool
+      tags:
+        - mariadb
+
+- name: Run node-local disk cleanup serially
+  hosts: deployment_nodes
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  vars_files:
+    - vars/free_disk_space.yml
+  tasks:
+    - name: Include node-local cleanup tasks
+      ansible.builtin.include_tasks:
+        file: tasks/free_disk_space_node.yml
+        apply:
+          tags:
+            - node
+      tags:
+        - node
+
+- name: Run cluster-wide OpenSearch cleanup once
+  hosts: deployment_nodes
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars_files:
+    - vars/free_disk_space.yml
+  tasks:
+    - name: Include cluster-wide cleanup tasks on one deployment node
+      ansible.builtin.include_tasks:
+        file: tasks/free_disk_space_cluster.yml
+        apply:
+          tags:
+            - cluster
+      run_once: true
+      tags:
+        - cluster

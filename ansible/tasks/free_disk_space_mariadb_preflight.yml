@@ -1,0 +1,141 @@
+---
+# This file is included in the non-serial validation play.  All MariaDB
+# nodes are checked before any node is allowed to purge its local binlogs.
+
+- name: Check whether the MariaDB container is running
+  ansible.builtin.command:
+    cmd: "docker ps --format '{% raw %}{{.Names}}{% endraw %}'"
+  register: free_disk_space_mariadb_containers
+  changed_when: false
+  tags:
+    - mariadb
+
+- name: Check the local MariaDB password file
+  ansible.builtin.stat:
+    path: "{{ free_disk_space_mariadb_password_file }}"
+  register: free_disk_space_local_mariadb_password_file
+  tags:
+    - mariadb
+
+- name: Read a node-local MariaDB password as a fallback
+  ansible.builtin.command:
+    argv:
+      - sed
+      - -n
+      - s/^database_password:[[:space:]]*//p
+      - "{{ free_disk_space_mariadb_password_file }}"
+  register: free_disk_space_local_mariadb_password
+  no_log: true
+  when: free_disk_space_local_mariadb_password_file.stat.exists | default(false)
+  tags:
+    - mariadb
+
+- name: Resolve the MariaDB password without exposing it in task output
+  ansible.builtin.set_fact:
+    free_disk_space_mariadb_password: >-
+      {{ free_disk_space_mariadb_root_password | default('')
+         if (free_disk_space_mariadb_root_password | default('') | length > 0)
+         else (hostvars[groups['deployment_controller'][0]].free_disk_space_kolla_passwords.database_password
+               | default(free_disk_space_local_mariadb_password.stdout | default(''), true)) }}
+  no_log: true
+  tags:
+    - mariadb
+
+- name: Report missing MariaDB preflight prerequisites in plan mode
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: MariaDB binlog cleanup is not actionable
+      because the container or root password is unavailable.
+  when:
+    - "'mariadb' not in free_disk_space_mariadb_containers.stdout_lines | default([]) or free_disk_space_mariadb_password | default('') | length == 0"
+  tags:
+    - mariadb
+
+- name: Refuse MariaDB cleanup when any node lacks its prerequisites
+  ansible.builtin.assert:
+    that:
+      - "'mariadb' in free_disk_space_mariadb_containers.stdout_lines | default([])"
+      - free_disk_space_mariadb_password | default('') | length > 0
+    fail_msg: >-
+      Refusing MariaDB cleanup on {{ inventory_hostname }} because the
+      mariadb container or root password is unavailable. Do not continue with
+      a partially checked cluster.
+  when:
+    - free_disk_space_apply | bool
+    - not ansible_check_mode
+  tags:
+    - mariadb
+
+- name: Query MariaDB Galera and replica state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - -e
+      - "MYSQL_PWD={{ free_disk_space_mariadb_password }}"
+      - mariadb
+      - mariadb
+      - -uroot
+      - --batch
+      - --skip-column-names
+      - -e
+      - >-
+        SHOW GLOBAL STATUS WHERE Variable_name IN
+        ('wsrep_ready','wsrep_cluster_size','wsrep_local_state_comment');
+  register: free_disk_space_mariadb_wsrep
+  no_log: true
+  changed_when: false
+  when:
+    - "'mariadb' in free_disk_space_mariadb_containers.stdout_lines | default([])"
+    - free_disk_space_mariadb_password | default('') | length > 0
+  tags:
+    - mariadb
+
+- name: Query local MariaDB asynchronous replica state
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - -e
+      - "MYSQL_PWD={{ free_disk_space_mariadb_password }}"
+      - mariadb
+      - mariadb
+      - -uroot
+      - --batch
+      - --skip-column-names
+      - -e
+      - SHOW SLAVE STATUS\G
+  register: free_disk_space_mariadb_replica
+  no_log: true
+  changed_when: false
+  when:
+    - "'mariadb' in free_disk_space_mariadb_containers.stdout_lines | default([])"
+    - free_disk_space_mariadb_password | default('') | length > 0
+  tags:
+    - mariadb
+
+- name: Refuse MariaDB purge unless every node is safe
+  ansible.builtin.assert:
+    that:
+      - free_disk_space_mariadb_replication_confirmed | bool
+      - free_disk_space_mariadb_wsrep.stdout is search('wsrep_ready\\s+ON')
+      - free_disk_space_mariadb_wsrep.stdout is search('wsrep_cluster_size\\s+' ~ (free_disk_space_mariadb_expected_cluster_size | string) ~ '(?:\\s|$)')
+      - free_disk_space_mariadb_wsrep.stdout is search('wsrep_local_state_comment\\s+Synced')
+      - free_disk_space_mariadb_replica.stdout | trim == ''
+    fail_msg: >-
+      Refusing MariaDB purge on {{ inventory_hostname }}. Require a fully
+      synced Galera cluster of the expected size, no local async replica, and
+      an explicit confirmation that no downstream backup/replica needs these
+      binlogs. SHOW SLAVE STATUS alone cannot prove the latter.
+  when:
+    - free_disk_space_apply | bool
+    - not ansible_check_mode
+
+- name: Mark this MariaDB node safe for the serial purge phase
+  ansible.builtin.set_fact:
+    free_disk_space_mariadb_safe: true
+  when:
+    - free_disk_space_apply | bool
+    - not ansible_check_mode
+  tags:
+    - mariadb

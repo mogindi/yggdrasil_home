@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # Recover space from an AIO/OpenStack host without deleting live Ceph storage.
+# For multi-node inventories, use ansible/free_disk_space.yml; this helper
+# remains a single-host compatibility script.
 # Run as root, for example:
 #   sudo ./free_disk_space.sh
 #
