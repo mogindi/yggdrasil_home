@@ -8,6 +8,46 @@
       set_fact:
         image_version: "{{ openstack_release }}-ubuntu-{% if (openstack_release|string) == '2025.2' %}noble{% else %}jammy{% endif %}"
 
+    - name: Create temporary image build directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: kolla-images
+      register: image_build_dir
+
+    - name: Create image build staging directories
+      ansible.builtin.file:
+        path: "{{ image_build_dir.path }}/{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - scripts/kolla-ansible
+        - scripts/openstack/trove-mongodb/controller
+
+    - name: Copy Docker image build contexts
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/kolla-ansible/{{ item }}/"
+        dest: "{{ image_build_dir.path }}/scripts/kolla-ansible/{{ item }}/"
+        mode: preserve
+      loop:
+        - mistral-images
+        - freezer-images
+        - zaqar-images
+        - senlin-images
+
+    - name: Copy image customization files
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ item }}"
+        dest: "{{ image_build_dir.path }}/{{ item }}"
+        mode: preserve
+      loop:
+        - scripts/kolla-ansible/patch-zun-cpu-stats.py
+        - scripts/kolla-ansible/patch-zun-wsproxy-mtls.py
+        - scripts/kolla-ansible/cloudkitty-metrics.yml
+        - scripts/openstack/trove-mongodb/controller/__init__.py
+        - scripts/openstack/trove-mongodb/controller/api.py
+        - scripts/openstack/trove-mongodb/controller/guestagent.py
+        - scripts/openstack/trove-mongodb/controller/taskmanager.py
+
     - name: Build Mistral service images with OpenStack actions
       shell: |
         set -euo pipefail
@@ -17,8 +57,8 @@
           docker build --network host \
             --build-arg BASE_IMAGE="$image" \
             --tag "$image" \
-            --file {{ playbook_dir }}/../scripts/kolla-ansible/mistral-images/Dockerfile \
-            {{ playbook_dir }}/../scripts/kolla-ansible/mistral-images
+            --file {{ image_build_dir.path }}/scripts/kolla-ansible/mistral-images/Dockerfile \
+            {{ image_build_dir.path }}/scripts/kolla-ansible/mistral-images
         done
       args:
         executable: /bin/bash
@@ -36,35 +76,35 @@
           --build-arg FREEZER_PIP_INDEX_URL="${FREEZER_PIP_INDEX_URL:-https://pypi.org/simple}" \
           --build-arg FREEZER_PIP_EXTRA_INDEX_URL="${FREEZER_PIP_EXTRA_INDEX_URL:-}" \
           --tag freezer-base:{{ image_version }} \
-          --file {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images/Dockerfile.base \
-          {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images
+          --file {{ image_build_dir.path }}/scripts/kolla-ansible/freezer-images/Dockerfile.base \
+          {{ image_build_dir.path }}/scripts/kolla-ansible/freezer-images
         docker build --network host \
           --build-arg FREEZER_IMAGE_TAG={{ image_version }} \
           --build-arg FREEZER_VERSION=17.0.0 \
           --build-arg FREEZER_PIP_INDEX_URL="${FREEZER_PIP_INDEX_URL:-https://pypi.org/simple}" \
           --build-arg FREEZER_PIP_EXTRA_INDEX_URL="${FREEZER_PIP_EXTRA_INDEX_URL:-}" \
           --tag quay.io/openstack.kolla/freezer-api:{{ image_version }} \
-          --file {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images/Dockerfile.api \
-          {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images
+          --file {{ image_build_dir.path }}/scripts/kolla-ansible/freezer-images/Dockerfile.api \
+          {{ image_build_dir.path }}/scripts/kolla-ansible/freezer-images
         docker build --network host \
           --build-arg FREEZER_IMAGE_TAG={{ image_version }} \
           --tag quay.io/openstack.kolla/freezer-scheduler:{{ image_version }} \
-          --file {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images/Dockerfile.scheduler \
-          {{ playbook_dir }}/../scripts/kolla-ansible/freezer-images
+          --file {{ image_build_dir.path }}/scripts/kolla-ansible/freezer-images/Dockerfile.scheduler \
+          {{ image_build_dir.path }}/scripts/kolla-ansible/freezer-images
         docker build --network host \
           --build-arg BASE_IMAGE=quay.io/openstack.kolla/openstack-base:{{ image_version }} \
           --build-arg ZAQAR_REF="${ZAQAR_REF:-stable/2025.2}" \
           --build-arg ZAQAR_PIP_INDEX_URL="${ZAQAR_PIP_INDEX_URL:-https://pypi.org/simple}" \
           --build-arg ZAQAR_PIP_EXTRA_INDEX_URL="${ZAQAR_PIP_EXTRA_INDEX_URL:-}" \
           --tag quay.io/openstack.kolla/zaqar:{{ image_version }} \
-          --file {{ playbook_dir }}/../scripts/kolla-ansible/zaqar-images/Dockerfile \
-          {{ playbook_dir }}/../scripts/kolla-ansible/zaqar-images
+          --file {{ image_build_dir.path }}/scripts/kolla-ansible/zaqar-images/Dockerfile \
+          {{ image_build_dir.path }}/scripts/kolla-ansible/zaqar-images
         docker build --network host \
           --build-arg BASE_IMAGE=quay.io/openstack.kolla/openstack-base:{{ image_version }} \
           --build-arg SENLIN_VERSION=16.0.0 \
           --tag senlin-base:{{ image_version }} \
-          --file {{ playbook_dir }}/../scripts/kolla-ansible/senlin-images/Dockerfile \
-          {{ playbook_dir }}/../scripts/kolla-ansible/senlin-images
+          --file {{ image_build_dir.path }}/scripts/kolla-ansible/senlin-images/Dockerfile \
+          {{ image_build_dir.path }}/scripts/kolla-ansible/senlin-images
         for service in api conductor engine health-manager; do
           docker tag senlin-base:{{ image_version }} \
             quay.io/openstack.kolla/senlin-${service}:{{ image_version }}
@@ -263,7 +303,7 @@
         docker rm -f tmp_build 2>/dev/null || true
         docker run -it -d --network host -u root --name tmp_build {{ item.item.image }} bash
         {% for custom_file in item.item.custom_files | default([]) %}
-        docker cp {{ playbook_dir }}/../{{ custom_file.src }} tmp_build:{{ custom_file.dest }}
+        docker cp {{ image_build_dir.path }}/{{ custom_file.src }} tmp_build:{{ custom_file.dest }}
         {% endfor %}
         docker exec tmp_build bash -c "set -xe; (ls {{ item.item.customize_marker | default('customize.done') }} && touch do_not_commit) || ( {{ item.item.custom_cmds }} ) && touch {{ item.item.customize_marker | default('customize.done') }}" || (docker rm -f tmp_build; exit 1)
         docker exec tmp_build ls do_not_commit || docker commit -c 'ENTRYPOINT ["dumb-init", "--"]' -c 'CMD ["kolla_start"]' tmp_build {{ item.item.image }}
@@ -280,4 +320,9 @@
         docker rm -f tmp_build
       failed_when: false
       changed_when: false
+
+    - name: Delete temporary image build directory
+      ansible.builtin.file:
+        path: "{{ image_build_dir.path }}"
+        state: absent
       
