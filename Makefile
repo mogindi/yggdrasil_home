@@ -191,7 +191,7 @@ dev-down: vagrant-destroy
 openstack-services:
 	ls ~/.ssh/id_rsa.pub || ssh-keygen -b 2048 -t rsa -f ~/.ssh/id_rsa -q -N ""
 	$(MAKE) -j 1 -Oline openstack-images-upload openstack-octavia openstack-rgw openstack-magnum  openstack-manila openstack-trove
-	source scripts/image-utils.sh && image_cleanup
+	source scripts/openstack/image-utils.sh && image_cleanup
 #	$(MAKE) openstack-remove-test-resources
 
 

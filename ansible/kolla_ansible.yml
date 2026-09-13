@@ -15,12 +15,13 @@
       environment:
         OPENSTACK_RELEASE: "{{ openstack_release }}"
 
-    - name: Avoid Pacemaker Remote on single-node AIO
+    - name: Avoid Pacemaker Remote when no dedicated compute nodes exist
       ansible.builtin.replace:
         path: "{{ playbook_dir }}/../workspace/inventory/99-openstack_groups"
         regexp: '^(\[hacluster-remote:children\])\ncompute\n\n'
         replace: '\1\n\n'
-      when: groups['deployment_nodes'] | length == 1
+      when:
+        - groups['deployment_nodes'] | length == 1 or not (hacluster_remote_enabled | default(true) | bool)
       tags: configure
 
     - name: Add inventory for deployment controller
