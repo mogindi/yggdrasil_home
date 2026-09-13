@@ -379,7 +379,7 @@ EOF
 # manila
 cat > etc/kolla/config/manila.conf <<EOF
 [DEFAULT]
-delete_share_server_with_last_share = false
+delete_share_server_with_last_share = true
 EOF
 
 # zun
