@@ -71,8 +71,13 @@
 - name: Build the previous custom-config path list
   ansible.builtin.set_fact:
     yggdrasil_previous_custom_config_paths: >-
-      {{ (yggdrasil_custom_config_manifest.content | b64decode).splitlines() }}
+      {{ (yggdrasil_custom_config_manifest.content | b64decode
+          | replace('\n', yggdrasil_custom_config_newline)).splitlines() }}
   when: yggdrasil_custom_config_manifest_stat.stat.exists
+  vars:
+    # Under Ansible's templating behavior, '\n' matches the literal
+    # backslash-n emitted by the previous manifest implementation.
+    yggdrasil_custom_config_newline: "\n"
 
 - name: Initialize the previous custom-config path list
   ansible.builtin.set_fact:
@@ -114,5 +119,7 @@
   ansible.builtin.copy:
     dest: "{{ yggdrasil_kolla_config_dir }}/.yggdrasil-custom-configs"
     content: |-
-      {{ yggdrasil_custom_config_paths | sort | join('\n') }}
+      {{ yggdrasil_custom_config_paths | sort | join(yggdrasil_custom_config_newline) }}
     mode: '0644'
+  vars:
+    yggdrasil_custom_config_newline: "\n"
