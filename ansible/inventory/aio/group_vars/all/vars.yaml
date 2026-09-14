@@ -89,6 +89,10 @@ openstack_ceph_rgw_vip_port: 6780
 openstack_release: 2025.2
 openstack_network_guard_enabled: false
 openstack_zun_kata_enabled: true
+# Docker/Kuryr containers do not consume Neutron DHCP DNS options directly.
+# Use the DNS server advertised by the Cloud Shell subnets as Docker's default.
+docker_dns_servers:
+  - "8.8.8.8"
 # Kata 3.32 strips Docker 29's private time namespace before it reaches the
 # Kata agent, fixing Cloud Shell startup on Docker 29.5+.
 kata_version: 3.32.0

@@ -458,7 +458,10 @@
               {{
                 (docker_daemon_configuration.content | b64decode | from_json)
                 | combine(
-                    {'runtimes': {'kata': {'runtimeType': 'io.containerd.kata.v2'}}},
+                    {
+                      'dns': docker_dns_servers | default(['8.8.8.8']),
+                      'runtimes': {'kata': {'runtimeType': 'io.containerd.kata.v2'}}
+                    },
                     recursive=True
                   )
                 | to_nice_json
