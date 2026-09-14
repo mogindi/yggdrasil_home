@@ -5,7 +5,7 @@
 set -xe
 
 
-OPENSTACK_RELEASE="${OPENSTACK_RELEASE:-2023.2}"
+OPENSTACK_RELEASE="${OPENSTACK_RELEASE:-2025.2}"
 
 # source venv
 cd workspace
