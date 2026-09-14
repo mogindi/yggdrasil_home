@@ -473,14 +473,21 @@ Render/apply Alertmanager PagerDuty config:
 
 ```bash
 export PAGERDUTY_INTEGRATION_KEY=<pagerduty-integration-key>
-export PAGERDUTY_SEVERITY_MAP='critical|warning'
+export PAGERDUTY_SEVERITY_MAP='critical|error|warning|info|P3|P4|P5'
 make alertmanager-pagerduty
 ```
 
 Notes:
 
 - `PAGERDUTY_INTEGRATION_KEY` enables PagerDuty notifications.
-- `PAGERDUTY_SEVERITY_MAP` is used for Alertmanager route matching.
+- `PAGERDUTY_SEVERITY_MAP` is used for Alertmanager route matching. The
+  default includes the standard severities plus the existing `P3`, `P4`, and
+  `P5` labels.
+- PagerDuty severity is mapped as `P3` → `error`, `P4` → `warning`, and
+  `P5` → `info`; standard `critical`, `error`, `warning`, and `info` values
+  are passed through.
+- Set `PAGERDUTY_SEVERITY_MAP='critical'` when only critical alerts should be
+  sent to PagerDuty.
 
 ---
 

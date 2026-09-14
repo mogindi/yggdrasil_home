@@ -95,5 +95,5 @@
         chdir: "{{ playbook_dir }}/../"
       environment:
         PAGERDUTY_INTEGRATION_KEY: "{{ lookup('env', 'PAGERDUTY_INTEGRATION_KEY') | default('', true) }}"
-        PAGERDUTY_SEVERITY_MAP: "{{ lookup('env', 'PAGERDUTY_SEVERITY_MAP') | default('critical', true) }}"
+        PAGERDUTY_SEVERITY_MAP: "{{ lookup('env', 'PAGERDUTY_SEVERITY_MAP') | default('critical|error|warning|info|P3|P4|P5', true) }}"
         
