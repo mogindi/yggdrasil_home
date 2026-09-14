@@ -4,6 +4,8 @@
 
 set -xe
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
 # source venv
 cd workspace
 source kolla-venv/bin/activate
@@ -13,4 +15,8 @@ INVENTORY=$(pwd)/inventory
 
 cd kolla-ansible/ansible/
 
-kolla-ansible $@ -i $INVENTORY --configdir $CONFIG_DIR 
+kolla-ansible "$@" -i "$INVENTORY" --configdir "$CONFIG_DIR"
+
+if [[ "${1:-}" == "post-deploy" ]]; then
+    bash "$SCRIPT_DIR/ensure-admin-openrc.sh" "$CONFIG_DIR/admin-openrc.sh"
+fi

@@ -508,7 +508,9 @@ Below is a complete catalog of Make targets in this repo.
 - `kollaansible-prechecks` — runs Kolla prechecks.
 - `kollaansible-deploy` — deploys OpenStack with retry-once behavior.
 - `kollaansible-upgrade` — performs Kolla upgrade.
-- `kollaansible-postdeploy` — runs Kolla post-deploy tasks.
+- `kollaansible-postdeploy` — runs Kolla post-deploy tasks and adds the
+  Watcher API version required by `python-watcherclient` to the generated
+  `workspace/etc/kolla/admin-openrc.sh`.
 - `kollaansible-lma` — deploys LMA playbook + reconfigures prometheus/alertmanager.
 - `prometheus-alerts` — copies Prometheus rules + reconfigures Prometheus.
 - `alertmanager-pagerduty` — renders Alertmanager config + reconfigures Alertmanager.
