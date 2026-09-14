@@ -406,7 +406,10 @@ cert_file = /etc/zun/docker-pki/cert.pem
 key_file = /etc/zun/docker-pki/key.pem
 EOF
 	cat > etc/kolla/config/zun/policy.yaml <<'EOF'
+# Cloud Shell images are built locally on each Zun node, so project owners
+# need to be able to request the ifnotpresent pull policy.
 "container:create:runtime": "!"
+"container:create:image_pull_policy": "rule:admin_or_owner"
 EOF
 else
 	rm -f etc/kolla/config/zun/policy.yaml
