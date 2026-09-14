@@ -221,7 +221,7 @@ secret-encrypt:
 
 secret-decrypt:
 	export ANSIBLE_VAULT_PASSWORD_FILE=~/.ansible_vault && \
-	yq .$(SECRET_KEY) ./ansible/inventory/aio/group_vars/all/secrets.yaml | ansible-vault decrypt 2>/dev/null; echo
+	yq .$(SECRET_KEY) /etc/ansible/hosts/group_vars/all/secrets.yaml | ansible-vault decrypt 2>/dev/null; echo
 
 
 
