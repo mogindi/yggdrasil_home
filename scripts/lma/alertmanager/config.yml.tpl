@@ -22,5 +22,5 @@ receivers:
         # PagerDuty accepts critical, error, warning, and info. The OpenStack
         # rules currently use P3/P4/P5 in the severity label, so translate
         # those values at the notification boundary without changing rules.
-        severity: '{{ if or (eq .CommonLabels.severity "critical") (eq .CommonLabels.severity "P1") (eq .CommonLabels.severity "P2") }}critical{{ else if or (eq .CommonLabels.severity "error") (eq .CommonLabels.severity "P3") }}error{{ else if or (eq .CommonLabels.severity "warning") (eq .CommonLabels.severity "P4") }}warning{{ else }}info{{ end }}'
+        severity: '{% raw %}{{ if or (eq .CommonLabels.severity "critical") (eq .CommonLabels.severity "P1") (eq .CommonLabels.severity "P2") }}critical{{ else if or (eq .CommonLabels.severity "error") (eq .CommonLabels.severity "P3") }}error{{ else if or (eq .CommonLabels.severity "warning") (eq .CommonLabels.severity "P4") }}warning{{ else }}info{{ end }}{% endraw %}'
         send_resolved: true

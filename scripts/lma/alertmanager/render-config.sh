@@ -1,11 +1,9 @@
 #!/bin/bash
 
-set -xeuo pipefail
+set -euo pipefail
 
 
 CONFIG_DIR=etc/kolla
-
-set -xe
 
 # source venv
 cd workspace
