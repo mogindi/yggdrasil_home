@@ -438,6 +438,8 @@
           command: /opt/kata/bin/kata-runtime check
           changed_when: false
       when: openstack_zun_kata_enabled | default(false) | bool
+      tags:
+        - kata
 
     - name: Configure Docker for Kata and Zun
       block:
@@ -542,6 +544,8 @@
         - name: Apply Docker runtime and mTLS configuration
           meta: flush_handlers
       when: openstack_zun_kata_enabled | default(false) | bool
+      tags:
+        - kata
 
     - name: Verify Docker Kata integration
       block:
@@ -587,6 +591,8 @@
           shell: "! ss -ltnH 'sport = :2375' | grep -q ."
           changed_when: false
       when: openstack_zun_kata_enabled | default(false) | bool
+      tags:
+        - kata
 
     #- name: Run internet connectivity script
     #  script: "{{ playbook_dir }}/../scripts/devices/revive_internet.sh {{ network_default_gateway_interface }}"
