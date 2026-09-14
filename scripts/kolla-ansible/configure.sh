@@ -186,6 +186,11 @@ set_global_config ceph_rgw_swift_compatibility no  # this is used to add "/swift
 set_global_config nova_console novnc
 
 set_global_config openstack_service_workers "$OPENSTACK_WORKER_COUNT"
+# Keep telemetry/dashboard APIs responsive when one metric query is slow.
+# These are intentionally service-specific rather than changing every
+# OpenStack API worker count.
+set_global_config skyline_gunicorn_workers 4
+set_global_config gnocchi_api_workers 4
 set_global_config heat_api_workers 4
 set_global_config openstack_service_rpc_workers "$OPENSTACK_WORKER_COUNT"
 
