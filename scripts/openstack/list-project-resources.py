@@ -203,6 +203,83 @@ GLOBAL_LEGACY_MANAGER_NAMES = {
 }
 
 
+# These service collections are status/history views rather than deletable
+# project resources.  Some deployed services expose them through a legacy
+# client even when the endpoint returns 404 for the list call.
+NON_DELETABLE_RESOURCE_NAMES = frozenset(
+    {
+        "network_ip_availability",
+        "network_ip_availabilities",
+    }
+)
+NON_DELETABLE_RESOURCE_NAMES_BY_SERVICE = {
+    "application-container": frozenset(
+        {
+            "action",
+            "actions",
+            "container_action",
+            "container_actions",
+            "log",
+            "logs",
+            "stats",
+        }
+    ),
+    "backup": frozenset({"action", "actions"}),
+    "clustering": frozenset({"action", "event"}),
+    "dns": frozenset(
+        {
+            "blacklist",
+            "blacklists",
+            "floatingip",
+            "floatingips",
+            "pool",
+            "pools",
+            "service_status",
+            "service_statuses",
+            "tld",
+            "tlds",
+            "tsigkey",
+            "tsigkeys",
+            "zone_export",
+            "zone_exports",
+            "zone_import",
+            "zone_imports",
+        }
+    ),
+    "image": frozenset({"image_member", "image_members", "member", "members"}),
+    "load-balancer": frozenset(
+        {
+            "healthmonitor",
+            "health_monitor",
+            "listener",
+            "member",
+            "pool",
+        }
+    ),
+    "orchestration": frozenset({"resource", "resources"}),
+}
+
+
+def _non_deletable_resource(service_type: str, resource_name: str) -> bool:
+    return (
+        resource_name in NON_DELETABLE_RESOURCE_NAMES
+        or resource_name
+        in NON_DELETABLE_RESOURCE_NAMES_BY_SERVICE.get(service_type, ())
+    )
+
+
+def _is_missing_resource_error(error: BaseException) -> bool:
+    """Return whether a list failure means this API resource is unavailable."""
+
+    text = _text(error).casefold()
+    return bool(
+        re.search(
+            r"\b404\b|not found|could not be found|resource could not be found",
+            text,
+        )
+    )
+
+
 # Some APIs expose project-owned objects without project_id in the SDK
 # resource model.  These names are only used after the request is made with a
 # project-scoped connection; they are not a service allow-list.
@@ -732,6 +809,8 @@ class BuiltinSDKProvider:
         for name, resource_class in self.resources.items():
             if name in GLOBAL_RESOURCE_NAMES and name not in exceptions:
                 continue
+            if _non_deletable_resource(self.endpoint.service_type, name):
+                continue
             placeholders = _resource_placeholders(resource_class)
             if placeholders:
                 continue
@@ -744,6 +823,8 @@ class BuiltinSDKProvider:
         exceptions = PROJECT_SCOPED_EXCEPTIONS.get(self.endpoint.service_type, set())
         for name, resource_class in self.resources.items():
             if name in GLOBAL_RESOURCE_NAMES and name not in exceptions:
+                continue
+            if _non_deletable_resource(self.endpoint.service_type, name):
                 continue
             placeholders = _resource_placeholders(resource_class)
             if self.endpoint.service_type == "object-store" and name == "object":
@@ -809,8 +890,9 @@ class BuiltinSDKProvider:
             try:
                 objects = self._list_spec(spec, project.project_id, objects_by_resource)
             except InventoryError as exc:
-                self.errors.append(_provider_error(spec.name, exc))
-                if strict:
+                if not _is_missing_resource_error(exc):
+                    self.errors.append(_provider_error(spec.name, exc))
+                if strict and not _is_missing_resource_error(exc):
                     raise
                 objects = []
             objects_by_resource[spec.name] = objects
@@ -834,30 +916,33 @@ class BuiltinSDKProvider:
                     try:
                         containers = _list_all(self.proxy, container_class)
                     except InventoryError as exc:
-                        self.errors.append(_provider_error("container", exc))
-                        if strict:
+                        if not _is_missing_resource_error(exc):
+                            self.errors.append(_provider_error("container", exc))
+                        if strict and not _is_missing_resource_error(exc):
                             raise
                         containers = []
                     objects_by_resource["container"] = containers
                     result["container"] = [_resource_to_dict(obj) for obj in containers]
-                all_objects: list[Any] = []
+                all_objects: list[dict[str, Any]] = []
                 for container in containers:
                     container_name = _resource_attr(container, "container")
                     if container_name is None:
                         continue
                     try:
-                        all_objects.extend(
-                            _list_all(
-                                self.proxy,
-                                object_class,
-                                container=container_name,
-                            )
-                        )
+                        for obj in _list_all(
+                            self.proxy,
+                            object_class,
+                            container=container_name,
+                        ):
+                            serialized = _resource_to_dict(obj)
+                            serialized.setdefault("container", container_name)
+                            all_objects.append(serialized)
                     except InventoryError as exc:
-                        self.errors.append(_provider_error("object", exc))
-                        if strict:
+                        if not _is_missing_resource_error(exc):
+                            self.errors.append(_provider_error("object", exc))
+                        if strict and not _is_missing_resource_error(exc):
                             raise
-                result["object"] = [_resource_to_dict(obj) for obj in all_objects]
+                result["object"] = all_objects
 
         pending = self._nested_specs()
         while pending:
@@ -877,8 +962,9 @@ class BuiltinSDKProvider:
                 try:
                     objects = self._list_spec(spec, project.project_id, objects_by_resource)
                 except InventoryError as exc:
-                    self.errors.append(_provider_error(spec.name, exc))
-                    if strict:
+                    if not _is_missing_resource_error(exc):
+                        self.errors.append(_provider_error(spec.name, exc))
+                    if strict and not _is_missing_resource_error(exc):
                         raise
                     objects = []
                 objects_by_resource[spec.name] = objects
@@ -969,6 +1055,9 @@ def _plugin_api_version(module: Any) -> str:
         configured = os.environ.get(environment_key)
         if configured:
             return configured
+    default_version = _text(getattr(module, "DEFAULT_API_VERSION", ""))
+    if default_version:
+        return default_version
     if isinstance(versions, Mapping) and versions:
         def version_key(value: str) -> tuple[tuple[int, Any], ...]:
             return tuple(
@@ -1036,6 +1125,7 @@ class LegacySDKProvider:
                 name.startswith("_")
                 or name in GLOBAL_RESOURCE_NAMES
                 or name in GLOBAL_LEGACY_MANAGER_NAMES
+                or _non_deletable_resource(self.endpoint.service_type, name)
             ):
                 continue
             manager = getattr(self.client, name, None)
@@ -1074,6 +1164,7 @@ class LegacySDKProvider:
     @staticmethod
     def _parent_argument(resource: Any, parameter_name: str) -> Any:
         if parameter_name.endswith("_name") or parameter_name in {
+            "container",
             "queue_name",
             "stack_name",
             "namespace_name",
@@ -1124,8 +1215,9 @@ class LegacySDKProvider:
                     f"listing legacy SDK resource {name!r} for service "
                     f"{self.endpoint.service_type!r} failed: {exc}"
                 )
-                self.errors.append(_provider_error(name, error))
-                if strict:
+                if not _is_missing_resource_error(error):
+                    self.errors.append(_provider_error(name, error))
+                if strict and not _is_missing_resource_error(error):
                     raise error from exc
                 objects_by_manager[name] = []
                 continue
@@ -1167,14 +1259,27 @@ class LegacySDKProvider:
                 try:
                     values = manager.list(*args, **kwargs)
                     if values:
-                        nested_values.extend(values)
+                        if (
+                            self.endpoint.service_type == "object-store"
+                            and _normalized_name(name) in {"object", "objects"}
+                        ):
+                            container_name = self._parent_argument(
+                                combination[0], required[0].name
+                            )
+                            for value in values:
+                                serialized = _resource_to_dict(value)
+                                serialized.setdefault("container", container_name)
+                                nested_values.append(serialized)
+                        else:
+                            nested_values.extend(values)
                 except Exception as exc:
                     error = InventoryError(
                         f"listing nested legacy SDK resource {name!r} for service "
                         f"{self.endpoint.service_type!r} failed: {exc}"
                     )
-                    self.errors.append(_provider_error(name, error))
-                    if strict:
+                    if not _is_missing_resource_error(error):
+                        self.errors.append(_provider_error(name, error))
+                    if strict and not _is_missing_resource_error(error):
                         raise error from exc
             objects_by_manager[name] = nested_values
             if nested_values:
@@ -1258,6 +1363,15 @@ def _generic_client_classes(endpoint: Endpoint) -> list[tuple[Any, Any]]:
                 )
                 if name.rsplit(".", 1)[-1] == "client"
             )
+        module_names = sorted(
+            set(module_names),
+            key=lambda name: (
+                -int(version.group(1))
+                if (version := re.search(r"\.v(\d+)(?:\.|$)", name))
+                else 1,
+                name,
+            ),
+        )
         for module_name in module_names:
             try:
                 module = importlib.import_module(module_name)
@@ -1324,18 +1438,26 @@ def resolve_provider(endpoint: Endpoint, connection: Any) -> Any:
     ]
     # An actual openstacksdk descriptor wins over a legacy CLI plugin.  The
     # descriptor is authoritative for service integrations maintained there.
-    if descriptions:
-        supported = [
-            description
-            for description in descriptions
-            if getattr(description, "supported_versions", {})
-        ]
-        if supported:
-            return BuiltinSDKProvider(endpoint, connection, supported[0])
+    supported = [
+        description
+        for description in descriptions
+        if getattr(description, "supported_versions", {})
+    ]
+    sdk_error: InventoryError | None = None
+    for description in supported:
+        try:
+            return BuiltinSDKProvider(endpoint, connection, description)
+        except InventoryError as exc:
+            # Some releases advertise a service descriptor but do not ship a
+            # usable version for the endpoint.  Give the installed legacy
+            # client a chance before reporting the service as unavailable.
+            sdk_error = exc
 
     provider = _legacy_provider(endpoint, connection)
     if provider is not None:
         return provider
+    if sdk_error is not None:
+        raise sdk_error
     provider = _generic_client_provider(endpoint, connection)
     if provider is not None:
         return provider

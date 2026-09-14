@@ -286,6 +286,29 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result["containers"][0]["id"], "container-1")
         self.assertEqual(result["actions"][0]["id"], "action-for-container-1")
 
+    def test_legacy_object_inventory_preserves_container_name(self) -> None:
+        class ContainerManager:
+            def list(self, all_projects=False):
+                return [{"name": "uploads", "project_id": "project-1"}]
+
+        class ObjectManager:
+            def list(self, container):
+                return [{"name": "file.txt"}]
+
+        provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
+        provider.endpoint = inventory.Endpoint(
+            "swift", "RegionOne", "swift", "object-store", "object-store", "public", "swift"
+        )
+        provider.module = types.SimpleNamespace(__name__="swiftclient")
+        provider.name = "swiftclient (legacy SDK)"
+        provider.client = types.SimpleNamespace(
+            containers=ContainerManager(), objects=ObjectManager()
+        )
+
+        result = provider.collect(inventory.Project("project-1", "Project", {}))
+
+        self.assertEqual(result["objects"][0]["container"], "uploads")
+
     def test_legacy_provider_continues_after_manager_failure(self) -> None:
         class WorkingManager:
             def list(self):
@@ -293,7 +316,7 @@ class ProviderTests(unittest.TestCase):
 
         class BrokenManager:
             def list(self):
-                raise RuntimeError('Error 404: {"title": "404 Not Found"}')
+                raise RuntimeError("Service Unavailable")
 
         provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
         provider.endpoint = inventory.Endpoint(
@@ -302,7 +325,7 @@ class ProviderTests(unittest.TestCase):
         provider.module = types.SimpleNamespace(__name__="freezerclient.client")
         provider.name = "freezerclient.client (Python SDK)"
         provider.client = types.SimpleNamespace(
-            backups=WorkingManager(), actions=BrokenManager()
+            backups=WorkingManager(), sessions=BrokenManager()
         )
 
         result = provider.collect(
@@ -310,8 +333,26 @@ class ProviderTests(unittest.TestCase):
         )
 
         self.assertEqual(result["backups"][0]["id"], "backup-1")
-        self.assertEqual(provider.errors[0]["resource"], "actions")
-        self.assertIn("404 Not Found", provider.errors[0]["error"])
+        self.assertEqual(provider.errors[0]["resource"], "sessions")
+        self.assertIn("Service Unavailable", provider.errors[0]["error"])
+
+    def test_legacy_provider_ignores_an_unavailable_optional_collection(self) -> None:
+        class MissingManager:
+            def list(self):
+                raise RuntimeError("NotFoundException: 404 resource could not be found")
+
+        provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
+        provider.endpoint = inventory.Endpoint(
+            "missing", "RegionOne", "missing", "missing", "missing", "public", "missing"
+        )
+        provider.module = types.SimpleNamespace(__name__="missingclient")
+        provider.name = "missingclient (Python SDK)"
+        provider.client = types.SimpleNamespace(resources=MissingManager())
+
+        result = provider.collect(inventory.Project("project-1", "Project", {}))
+
+        self.assertEqual(result, {})
+        self.assertEqual(provider.errors, [])
 
     @mock.patch.object(inventory, "_generic_client_classes")
     def test_conventional_client_module_is_used_without_an_osc_plugin(

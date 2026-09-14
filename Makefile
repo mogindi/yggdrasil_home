@@ -108,6 +108,10 @@ openstack-project-resources:
 	@test -n "$(PROJECT)" || (echo "PROJECT is required, for example: make openstack-project-resources PROJECT=admin" >&2; exit 2)
 	@if [[ -f workspace/kolla-venv/bin/activate ]]; then source workspace/kolla-venv/bin/activate; fi; scripts/openstack/list-project-resources.py --project "$(PROJECT)" $(ARGS)
 
+openstack-project-resources-delete:
+	@test -n "$(REPORT)" || (echo "REPORT is required and must be JSON output from list-project-resources.py" >&2; exit 2)
+	@if [[ -f workspace/kolla-venv/bin/activate ]]; then source workspace/kolla-venv/bin/activate; fi; scripts/openstack/delete-project-resources.py "$(REPORT)" $(ARGS)
+
 openstack-resources-init:
 	ansible-playbook ansible/init_resources.yml $(VAULT_ARGS) $(ARGS)
 	#scripts/openstack/init-resources.sh
