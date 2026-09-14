@@ -378,6 +378,7 @@ files are tracked and removed when they are deleted from
    source workspace/kolla-venv/bin/activate
    scripts/openstack/list-project-resources.py --project admin
    scripts/openstack/list-project-resources.py --project admin --format json
+   scripts/openstack/list-project-resources.py --project admin --strict
    # equivalent Make target:
    make openstack-project-resources PROJECT=admin
    ```
@@ -387,14 +388,14 @@ files are tracked and removed when they are deleted from
    It uses the core `openstack endpoint list -f json` command only as a
    fallback if the SDK cannot read the catalog. It then resolves each selected
    endpoint to an installed `openstacksdk` service proxy or legacy Python
-   client and enumerates its project-scoped resources. It exits nonzero if an
-   endpoint has no matching list-capable client or if a client/list request
-   fails, so the output is never presented as a complete inventory when it is
-   partial. New services integrated into `openstacksdk` or registered as
-   OpenStack client plugins are discovered without editing this script. The
-   deployment's `panel`, `LMS`, and `cloudformation` catalog endpoints are
-   intentionally ignored because they are dashboard or compatibility APIs,
-   rather than project-resource services.
+   client and enumerates its project-scoped resources. By default, it
+   continues when a client or individual resource request fails and includes
+   the failure in the table or JSON `errors` field. Use `--strict` to make
+   those failures nonzero. New services integrated into `openstacksdk` or
+   registered as OpenStack client plugins are discovered without editing this
+   script. The deployment's `panel`, `LMS`, and `cloudformation` catalog
+   endpoints are intentionally ignored because they are dashboard or
+   compatibility APIs, rather than project-resource services.
 
 10. **Operate and maintain**
     - Reconfigure services after variable updates:
@@ -509,8 +510,8 @@ Below is a complete catalog of Make targets in this repo.
 - `kollaansible-deploy` — deploys OpenStack with retry-once behavior.
 - `kollaansible-upgrade` — performs Kolla upgrade.
 - `kollaansible-postdeploy` — runs Kolla post-deploy tasks and adds the
-  Watcher API version required by `python-watcherclient` to the generated
-  `workspace/etc/kolla/admin-openrc.sh`.
+  Freezer and Watcher API versions required by the installed clients to the
+  generated `workspace/etc/kolla/admin-openrc.sh`.
 - `kollaansible-lma` — deploys LMA playbook + reconfigures prometheus/alertmanager.
 - `prometheus-alerts` — copies Prometheus rules + reconfigures Prometheus.
 - `alertmanager-pagerduty` — renders Alertmanager config + reconfigures Alertmanager.
@@ -525,8 +526,9 @@ Below is a complete catalog of Make targets in this repo.
   to customize the space-separated role list.
 - `openstack-project-resources` — lists all resources visible to `PROJECT`,
   using the Python SDKs discovered from the endpoint catalog. Pass
-  `ARGS="--format json"` for machine-readable output; missing clients and list
-  failures are hard errors.
+  `ARGS="--format json"` for machine-readable output; resource failures are
+  reported while other resources continue. Pass `ARGS="--strict"` to make
+  client and list failures hard errors.
 - `openstack-resources-init` — initializes OpenStack resources.
 - `openstack-images-upload` — uploads the default cloud image set. When run with
   `ENV=aio`, this target uploads only the Ubuntu Noble image; the Magnum

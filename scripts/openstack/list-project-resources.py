@@ -8,9 +8,10 @@ a catalog fallback. Resource enumeration is performed through Python SDKs:
 openstacksdk proxies are used when available, with dynamically discovered
 legacy client SDKs as a fallback.
 
-The command fails if an enabled, selected endpoint cannot be mapped to a
-list-capable Python client, or if any resource request fails.  This prevents a
-successful-looking report from hiding an incomplete inventory.
+The command produces a best-effort inventory by default.  Resource request
+failures are included in the report and do not prevent other resources from
+being listed.  Use ``--strict`` when an incomplete inventory should be a hard
+failure.
 
 The deployment-specific dashboard and compatibility endpoints for ``panel``,
 ``LMS``, and ``cloudformation`` are intentionally excluded because they are
@@ -72,6 +73,10 @@ class ResourceSpec:
     name: str
     resource_class: type
     placeholders: tuple[str, ...]
+
+
+def _provider_error(resource_type: str, message: Any) -> dict[str, str]:
+    return {"resource": resource_type, "error": _text(message)}
 
 
 # These catalog services are enabled in the deployment but are not included
@@ -667,6 +672,7 @@ class BuiltinSDKProvider:
         self.connection = connection
         self.description = description
         self.name = "openstacksdk"
+        self.errors: list[dict[str, str]] = []
         supported_versions = getattr(description, "supported_versions", {})
         if not supported_versions:
             raise UnsupportedClientError(
@@ -765,7 +771,10 @@ class BuiltinSDKProvider:
             objects.extend(_list_all(self.proxy, spec.resource_class, **kwargs))
         return [obj for obj in objects if _belongs_to_project(obj, project_id)]
 
-    def collect(self, project: Project) -> dict[str, list[dict[str, Any]]]:
+    def collect(
+        self, project: Project, strict: bool = True
+    ) -> dict[str, list[dict[str, Any]]]:
+        self.errors = []
         result: dict[str, list[dict[str, Any]]] = {}
         objects_by_resource: dict[str, list[Any]] = {}
 
@@ -776,7 +785,13 @@ class BuiltinSDKProvider:
             objects_by_resource["project"] = [project.raw]
 
         for spec in self._direct_specs():
-            objects = self._list_spec(spec, project.project_id, objects_by_resource)
+            try:
+                objects = self._list_spec(spec, project.project_id, objects_by_resource)
+            except InventoryError as exc:
+                self.errors.append(_provider_error(spec.name, exc))
+                if strict:
+                    raise
+                objects = []
             objects_by_resource[spec.name] = objects
             result[spec.name] = [_resource_to_dict(obj) for obj in objects]
 
@@ -786,27 +801,42 @@ class BuiltinSDKProvider:
             container_class = self.resources.get("container")
             object_class = self.resources.get("object")
             if not container_class or not object_class:
-                raise UnsupportedClientError(
+                exc = UnsupportedClientError(
                     "openstacksdk object-store proxy does not expose both container and object resources"
                 )
-            containers = objects_by_resource.get("container")
-            if containers is None:
-                containers = _list_all(self.proxy, container_class)
-                objects_by_resource["container"] = containers
-                result["container"] = [_resource_to_dict(obj) for obj in containers]
-            all_objects: list[Any] = []
-            for container in containers:
-                container_name = _resource_attr(container, "container")
-                if container_name is None:
-                    continue
-                all_objects.extend(
-                    _list_all(
-                        self.proxy,
-                        object_class,
-                        container=container_name,
-                    )
-                )
-            result["object"] = [_resource_to_dict(obj) for obj in all_objects]
+                self.errors.append(_provider_error("object-store", exc))
+                if strict:
+                    raise exc
+            else:
+                containers = objects_by_resource.get("container")
+                if containers is None:
+                    try:
+                        containers = _list_all(self.proxy, container_class)
+                    except InventoryError as exc:
+                        self.errors.append(_provider_error("container", exc))
+                        if strict:
+                            raise
+                        containers = []
+                    objects_by_resource["container"] = containers
+                    result["container"] = [_resource_to_dict(obj) for obj in containers]
+                all_objects: list[Any] = []
+                for container in containers:
+                    container_name = _resource_attr(container, "container")
+                    if container_name is None:
+                        continue
+                    try:
+                        all_objects.extend(
+                            _list_all(
+                                self.proxy,
+                                object_class,
+                                container=container_name,
+                            )
+                        )
+                    except InventoryError as exc:
+                        self.errors.append(_provider_error("object", exc))
+                        if strict:
+                            raise
+                result["object"] = [_resource_to_dict(obj) for obj in all_objects]
 
         pending = self._nested_specs()
         while pending:
@@ -823,7 +853,13 @@ class BuiltinSDKProvider:
                 ):
                     remaining.append(spec)
                     continue
-                objects = self._list_spec(spec, project.project_id, objects_by_resource)
+                try:
+                    objects = self._list_spec(spec, project.project_id, objects_by_resource)
+                except InventoryError as exc:
+                    self.errors.append(_provider_error(spec.name, exc))
+                    if strict:
+                        raise
+                    objects = []
                 objects_by_resource[spec.name] = objects
                 result[spec.name] = [_resource_to_dict(obj) for obj in objects]
                 progressed = True
@@ -934,6 +970,7 @@ class LegacySDKProvider:
         self.entry = entry
         self.module = module
         self.name = f"{module.__name__} (legacy SDK)"
+        self.errors: list[dict[str, str]] = []
         self._unlisted_nested_managers: list[str] = []
         make_client = getattr(module, "make_client", None)
         if not callable(make_client):
@@ -966,6 +1003,7 @@ class LegacySDKProvider:
         provider.module = module
         provider.name = f"{module.__name__} (Python SDK)"
         provider.client = client
+        provider.errors = []
         provider._unlisted_nested_managers = []
         return provider
 
@@ -1039,14 +1077,20 @@ class LegacySDKProvider:
                 kwargs[key] = False
         return kwargs
 
-    def collect(self, project: Project) -> dict[str, list[dict[str, Any]]]:
+    def collect(
+        self, project: Project, strict: bool = True
+    ) -> dict[str, list[dict[str, Any]]]:
+        self.errors = []
         managers = self._managers()
         nested_managers = getattr(self, "_nested_managers", [])
         if not managers:
             if not nested_managers:
-                raise UnsupportedClientError(
+                exc = UnsupportedClientError(
                     f"legacy SDK {self.module.__name__!r} exposes no listable project resources"
                 )
+                self.errors.append(_provider_error("(provider)", exc))
+                if strict:
+                    raise exc
         result: dict[str, list[dict[str, Any]]] = {}
         objects_by_manager: dict[str, list[Any]] = {}
         for name, manager, signature in managers:
@@ -1055,10 +1099,15 @@ class LegacySDKProvider:
                 values = manager.list(**kwargs)
                 values = [] if values is None else list(values)
             except Exception as exc:
-                raise InventoryError(
+                error = InventoryError(
                     f"listing legacy SDK resource {name!r} for service "
                     f"{self.endpoint.service_type!r} failed: {exc}"
-                ) from exc
+                )
+                self.errors.append(_provider_error(name, error))
+                if strict:
+                    raise error from exc
+                objects_by_manager[name] = []
+                continue
             values = [value for value in values if _belongs_to_project(value, project.project_id)]
             objects_by_manager[name] = values
             if values:
@@ -1095,21 +1144,30 @@ class LegacySDKProvider:
                     else:
                         args.append(value)
                 try:
-                    nested_values.extend(manager.list(*args, **kwargs))
+                    values = manager.list(*args, **kwargs)
+                    if values:
+                        nested_values.extend(values)
                 except Exception as exc:
-                    raise InventoryError(
+                    error = InventoryError(
                         f"listing nested legacy SDK resource {name!r} for service "
                         f"{self.endpoint.service_type!r} failed: {exc}"
-                    ) from exc
+                    )
+                    self.errors.append(_provider_error(name, error))
+                    if strict:
+                        raise error from exc
             objects_by_manager[name] = nested_values
             if nested_values:
                 result[name] = [_resource_to_dict(value) for value in nested_values]
 
         if unlisted_nested:
-            raise UnsupportedClientError(
+            error = UnsupportedClientError(
                 f"legacy SDK {self.module.__name__!r} exposes nested list resources "
                 f"that could not be enumerated: {', '.join(sorted(set(unlisted_nested)))}"
             )
+            for name in sorted(set(unlisted_nested)):
+                self.errors.append(_provider_error(name, error))
+            if strict:
+                raise error
         return result
 
 
@@ -1282,32 +1340,52 @@ def inventory(
     endpoints: list[Endpoint],
     connection: Any,
     project: Project,
+    strict: bool = True,
 ) -> dict[str, Any]:
     endpoints = [endpoint for endpoint in endpoints if not _is_ignored_endpoint(endpoint)]
     target_connection = _as_project_connection(connection, project)
 
-    # Resolve every selected endpoint before making resource calls.  This is
-    # the preflight that turns missing client support into a hard error rather
-    # than a partial report.
+    # Resolve every selected endpoint before making resource calls.  A missing
+    # client is retained as a report error in best-effort mode so other
+    # endpoints can still be inventoried.
     providers: list[tuple[Endpoint, Any]] = []
-    preflight_errors: list[str] = []
+    errors: list[dict[str, str]] = []
     for endpoint in endpoints:
         try:
             providers.append((endpoint, resolve_provider(endpoint, target_connection)))
         except InventoryError as exc:
-            preflight_errors.append(
-                f"{endpoint.service_type} ({endpoint.raw_service_type}, {endpoint.url}): {exc}"
+            errors.append(
+                {
+                    "service": endpoint.service_type,
+                    "resource": "(client)",
+                    "error": (
+                        f"{endpoint.service_type} ({endpoint.raw_service_type}, "
+                        f"{endpoint.url}): {exc}"
+                    ),
+                }
             )
-    if preflight_errors:
+    if errors and strict:
         raise InventoryError(
             "service client preflight failed; no resources were listed:\n- "
-            + "\n- ".join(preflight_errors)
+            + "\n- ".join(issue["error"] for issue in errors)
         )
 
     resources: dict[str, Any] = {}
     provider_metadata: dict[str, Any] = {}
     for endpoint, provider in providers:
-        collected = provider.collect(project)
+        try:
+            collected = provider.collect(project, strict=strict)
+        except Exception as exc:
+            if strict:
+                raise
+            errors.append(
+                {
+                    "service": endpoint.service_type,
+                    "resource": "(provider)",
+                    "error": _text(exc),
+                }
+            )
+            collected = {}
         resources[endpoint.service_type] = collected
         provider_metadata[endpoint.service_type] = {
             "provider": provider.name,
@@ -1317,11 +1395,20 @@ def inventory(
             "region": endpoint.region,
             "url": endpoint.url,
         }
+        for issue in getattr(provider, "errors", ()):
+            errors.append(
+                {
+                    "service": endpoint.service_type,
+                    "resource": issue["resource"],
+                    "error": issue["error"],
+                }
+            )
     return {
         "project": {"id": project.project_id, "name": project.name},
         "endpoints": [dataclasses.asdict(endpoint) for endpoint in endpoints],
         "providers": provider_metadata,
         "resources": resources,
+        "errors": errors,
     }
 
 
@@ -1343,30 +1430,39 @@ def render_table(report: Mapping[str, Any]) -> str:
         for service_resources in resources.values()
         for objects in service_resources.values()
     ):
-        return "\n".join(lines + ["No project resources found."])
-    for service_type in sorted(resources):
-        provider = report.get("providers", {}).get(service_type, {})
-        lines.append(
-            f"{service_type} ({provider.get('provider', 'unknown')})"
-        )
-        for resource_type in sorted(resources[service_type]):
-            objects = resources[service_type][resource_type]
-            lines.append(f"  {resource_type}: {len(objects)}")
-            if not objects:
-                continue
-            rows = []
-            for obj in objects:
-                rows.append(
-                    [
-                        _short(obj.get("id", obj.get("uuid", ""))),
-                        _short(obj.get("name", obj.get("display_name", "")), 40),
-                        _short(obj.get("status", obj.get("state", "")), 20),
-                    ]
-                )
-            lines.append("    ID                                      NAME                                      STATUS")
-            for row in rows:
-                lines.append(f"    {row[0]:<40}  {row[1]:<40}  {row[2]}")
-        lines.append("")
+        lines.append("No project resources found.")
+    else:
+        for service_type in sorted(resources):
+            provider = report.get("providers", {}).get(service_type, {})
+            lines.append(
+                f"{service_type} ({provider.get('provider', 'unknown')})"
+            )
+            for resource_type in sorted(resources[service_type]):
+                objects = resources[service_type][resource_type]
+                lines.append(f"  {resource_type}: {len(objects)}")
+                if not objects:
+                    continue
+                rows = []
+                for obj in objects:
+                    rows.append(
+                        [
+                            _short(obj.get("id", obj.get("uuid", ""))),
+                            _short(obj.get("name", obj.get("display_name", "")), 40),
+                            _short(obj.get("status", obj.get("state", "")), 20),
+                        ]
+                    )
+                lines.append("    ID                                      NAME                                      STATUS")
+                for row in rows:
+                    lines.append(f"    {row[0]:<40}  {row[1]:<40}  {row[2]}")
+            lines.append("")
+    errors = report.get("errors", [])
+    if errors:
+        lines.extend(("Errors:",))
+        for issue in errors:
+            lines.append(
+                f"  {issue.get('service', 'unknown')} / "
+                f"{issue.get('resource', 'unknown')}: {issue.get('error', '')}"
+            )
     return "\n".join(lines).rstrip()
 
 
@@ -1400,6 +1496,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("OPENSTACK_BIN", "openstack"),
         help="Core OpenStack executable used as the endpoint-discovery fallback.",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail instead of returning a partial inventory when a client or resource request fails.",
+    )
     parser.add_argument("--debug", action="store_true", help="Show a traceback on failure.")
     return parser
 
@@ -1413,12 +1514,12 @@ def main(argv: list[str] | None = None) -> int:
         endpoints = discover_endpoints(connection, args.openstack_bin)
         endpoints = select_endpoints(endpoints, args.interface, args.region)
         project = resolve_project(connection, args.project)
-        report = inventory(endpoints, connection, project)
+        report = inventory(endpoints, connection, project, strict=args.strict)
         if args.format == "json":
             print(json.dumps(report, indent=2, sort_keys=True))
         else:
             print(render_table(report))
-        return 0
+        return 2 if args.strict and report.get("errors") else 0
     except InventoryError as exc:
         if args.debug:
             raise

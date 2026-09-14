@@ -275,6 +275,33 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result["containers"][0]["id"], "container-1")
         self.assertEqual(result["actions"][0]["id"], "action-for-container-1")
 
+    def test_legacy_provider_continues_after_manager_failure(self) -> None:
+        class WorkingManager:
+            def list(self):
+                return [{"id": "backup-1", "project_id": "project-1"}]
+
+        class BrokenManager:
+            def list(self):
+                raise RuntimeError('Error 404: {"title": "404 Not Found"}')
+
+        provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
+        provider.endpoint = inventory.Endpoint(
+            "backup", "RegionOne", "freezer", "backup", "backup", "public", "backup"
+        )
+        provider.module = types.SimpleNamespace(__name__="freezerclient.client")
+        provider.name = "freezerclient.client (Python SDK)"
+        provider.client = types.SimpleNamespace(
+            backups=WorkingManager(), actions=BrokenManager()
+        )
+
+        result = provider.collect(
+            inventory.Project("project-1", "Project", {}), strict=False
+        )
+
+        self.assertEqual(result["backups"][0]["id"], "backup-1")
+        self.assertEqual(provider.errors[0]["resource"], "actions")
+        self.assertIn("404 Not Found", provider.errors[0]["error"])
+
     @mock.patch.object(inventory, "_generic_client_classes")
     def test_conventional_client_module_is_used_without_an_osc_plugin(
         self, client_classes: mock.Mock
@@ -318,6 +345,49 @@ class InventoryTests(unittest.TestCase):
             with self.assertRaisesRegex(inventory.InventoryError, "no resources were listed"):
                 inventory.inventory(endpoints, connection, project)
         first_provider.collect.assert_not_called()
+
+    def test_best_effort_inventory_keeps_resources_and_reports_preflight_errors(self) -> None:
+        endpoints = [
+            inventory.Endpoint("one", "RegionOne", "one", "one", "one", "public", "one"),
+            inventory.Endpoint("two", "RegionOne", "two", "two", "two", "public", "two"),
+        ]
+        connection = types.SimpleNamespace(current_project_id="project-1")
+        project = inventory.Project("project-1", "Project", {})
+        first_provider = types.SimpleNamespace(
+            name="first",
+            errors=[],
+            collect=mock.Mock(return_value={"resources": [{"id": "resource-1"}]}),
+        )
+
+        def resolve(endpoint, target):
+            if endpoint.service_type == "two":
+                raise inventory.UnsupportedClientError("missing client")
+            return first_provider
+
+        with mock.patch.object(inventory, "resolve_provider", side_effect=resolve):
+            report = inventory.inventory(endpoints, connection, project, strict=False)
+
+        self.assertEqual(report["resources"]["one"]["resources"][0]["id"], "resource-1")
+        self.assertEqual(report["errors"][0]["service"], "two")
+        self.assertEqual(report["errors"][0]["resource"], "(client)")
+
+    def test_render_table_shows_resource_errors(self) -> None:
+        output = inventory.render_table(
+            {
+                "project": {"id": "project-1", "name": "Project"},
+                "resources": {"backup": {"backups": []}},
+                "providers": {"backup": {"provider": "freezerclient"}},
+                "errors": [
+                    {
+                        "service": "backup",
+                        "resource": "actions",
+                        "error": "Error 404: Not Found",
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("backup / actions: Error 404: Not Found", output)
 
 
 if __name__ == "__main__":

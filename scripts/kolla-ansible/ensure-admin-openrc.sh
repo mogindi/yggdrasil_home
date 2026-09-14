@@ -13,6 +13,15 @@ if [[ ! -f "$openrc_file" ]]; then
     exit 1
 fi
 
+if grep -Eq '^[[:space:]]*(export[[:space:]]+)?OS_BACKUP_API_VERSION=' "$openrc_file"; then
+    sed -i -E \
+        's/^[[:space:]]*(export[[:space:]]+)?OS_BACKUP_API_VERSION=.*/export OS_BACKUP_API_VERSION=2/' \
+        "$openrc_file"
+else
+    printf '\n# Freezer API version enabled by the deployed Freezer service.\nexport OS_BACKUP_API_VERSION=2\n' \
+        >> "$openrc_file"
+fi
+
 if grep -Eq '^[[:space:]]*(export[[:space:]]+)?OS_INFRA_OPTIM_API_VERSION=' "$openrc_file"; then
     sed -i -E \
         's/^[[:space:]]*(export[[:space:]]+)?OS_INFRA_OPTIM_API_VERSION=.*/export OS_INFRA_OPTIM_API_VERSION=1.0/' \
