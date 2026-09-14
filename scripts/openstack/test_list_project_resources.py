@@ -168,6 +168,65 @@ class EndpointTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.TestCase):
+    def test_project_connection_uses_project_id_not_project_name(self) -> None:
+        connection = mock.Mock()
+        connection.connect_as.return_value = "scoped"
+        self.assertEqual(
+            inventory._connection_as_project(connection, "project-1"),
+            "scoped",
+        )
+        connection.connect_as.assert_called_once_with(project_id="project-1")
+
+    def test_project_filter_uses_user_project_id_when_present(self) -> None:
+        self.assertTrue(
+            inventory._belongs_to_project(
+                {"user_project_id": "project-1"}, "project-1"
+            )
+        )
+        self.assertFalse(
+            inventory._belongs_to_project(
+                {"user_project_id": "project-2"}, "project-1"
+            )
+        )
+
+    def test_project_filter_uses_nested_location_project(self) -> None:
+        resource = {"location": {"project": {"id": "project-2"}}}
+        self.assertFalse(inventory._belongs_to_project(resource, "project-1"))
+
+    def test_location_project_precedes_heat_stack_user_project(self) -> None:
+        resource = {
+            "location": {"project": {"id": "project-1"}},
+            "user_project_id": "heat-stack-user-project",
+        }
+        self.assertTrue(inventory._belongs_to_project(resource, "project-1"))
+
+    def test_project_filter_uses_heat_stack_link_project(self) -> None:
+        resource = {
+            "links": [
+                {
+                    "href": "http://heat.example/v1/22222222222222222222222222222222/stacks/name/id",
+                    "rel": "self",
+                }
+            ],
+            "location": {"project": {"id": "11111111111111111111111111111111"}},
+        }
+        self.assertFalse(
+            inventory._belongs_to_project(
+                resource, "11111111111111111111111111111111"
+            )
+        )
+
+    def test_workflow_executions_are_limited_to_project_workflows(self) -> None:
+        workflows = [{"id": "workflow-1"}]
+        executions = [
+            {"id": "execution-1", "workflow_id": "workflow-1"},
+            {"id": "execution-2", "workflow_id": "workflow-2"},
+        ]
+        filtered = inventory._filter_related_resources(
+            "workflow", "execution", executions, {"workflow": workflows}
+        )
+        self.assertEqual([item["id"] for item in filtered], ["execution-1"])
+
     def test_service_descriptor_does_not_match_unrelated_endpoint(self) -> None:
         description = types.SimpleNamespace(service_type="compute", all_types=())
         endpoint = inventory.Endpoint(
@@ -286,6 +345,29 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result["containers"][0]["id"], "container-1")
         self.assertEqual(result["actions"][0]["id"], "action-for-container-1")
 
+    def test_legacy_object_inventory_preserves_container_name(self) -> None:
+        class ContainerManager:
+            def list(self, all_projects=False):
+                return [{"name": "uploads", "project_id": "project-1"}]
+
+        class ObjectManager:
+            def list(self, container):
+                return [{"name": "file.txt"}]
+
+        provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
+        provider.endpoint = inventory.Endpoint(
+            "swift", "RegionOne", "swift", "object-store", "object-store", "public", "swift"
+        )
+        provider.module = types.SimpleNamespace(__name__="swiftclient")
+        provider.name = "swiftclient (legacy SDK)"
+        provider.client = types.SimpleNamespace(
+            containers=ContainerManager(), objects=ObjectManager()
+        )
+
+        result = provider.collect(inventory.Project("project-1", "Project", {}))
+
+        self.assertEqual(result["objects"][0]["container"], "uploads")
+
     def test_legacy_provider_continues_after_manager_failure(self) -> None:
         class WorkingManager:
             def list(self):
@@ -293,7 +375,7 @@ class ProviderTests(unittest.TestCase):
 
         class BrokenManager:
             def list(self):
-                raise RuntimeError('Error 404: {"title": "404 Not Found"}')
+                raise RuntimeError("Service Unavailable")
 
         provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
         provider.endpoint = inventory.Endpoint(
@@ -302,7 +384,7 @@ class ProviderTests(unittest.TestCase):
         provider.module = types.SimpleNamespace(__name__="freezerclient.client")
         provider.name = "freezerclient.client (Python SDK)"
         provider.client = types.SimpleNamespace(
-            backups=WorkingManager(), actions=BrokenManager()
+            backups=WorkingManager(), sessions=BrokenManager()
         )
 
         result = provider.collect(
@@ -310,8 +392,26 @@ class ProviderTests(unittest.TestCase):
         )
 
         self.assertEqual(result["backups"][0]["id"], "backup-1")
-        self.assertEqual(provider.errors[0]["resource"], "actions")
-        self.assertIn("404 Not Found", provider.errors[0]["error"])
+        self.assertEqual(provider.errors[0]["resource"], "sessions")
+        self.assertIn("Service Unavailable", provider.errors[0]["error"])
+
+    def test_legacy_provider_ignores_an_unavailable_optional_collection(self) -> None:
+        class MissingManager:
+            def list(self):
+                raise RuntimeError("NotFoundException: 404 resource could not be found")
+
+        provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
+        provider.endpoint = inventory.Endpoint(
+            "missing", "RegionOne", "missing", "missing", "missing", "public", "missing"
+        )
+        provider.module = types.SimpleNamespace(__name__="missingclient")
+        provider.name = "missingclient (Python SDK)"
+        provider.client = types.SimpleNamespace(resources=MissingManager())
+
+        result = provider.collect(inventory.Project("project-1", "Project", {}))
+
+        self.assertEqual(result, {})
+        self.assertEqual(provider.errors, [])
 
     @mock.patch.object(inventory, "_generic_client_classes")
     def test_conventional_client_module_is_used_without_an_osc_plugin(

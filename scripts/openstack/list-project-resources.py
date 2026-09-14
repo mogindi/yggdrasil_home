@@ -203,17 +203,94 @@ GLOBAL_LEGACY_MANAGER_NAMES = {
 }
 
 
+# These service collections are status/history views rather than deletable
+# project resources.  Some deployed services expose them through a legacy
+# client even when the endpoint returns 404 for the list call.
+NON_DELETABLE_RESOURCE_NAMES = frozenset(
+    {
+        "network_ip_availability",
+        "network_ip_availabilities",
+    }
+)
+NON_DELETABLE_RESOURCE_NAMES_BY_SERVICE = {
+    "application-container": frozenset(
+        {
+            "action",
+            "actions",
+            "container_action",
+            "container_actions",
+            "log",
+            "logs",
+            "stats",
+        }
+    ),
+    "backup": frozenset({"action", "actions"}),
+    "clustering": frozenset({"action", "event"}),
+    "dns": frozenset(
+        {
+            "blacklist",
+            "blacklists",
+            "floatingip",
+            "floatingips",
+            "pool",
+            "pools",
+            "service_status",
+            "service_statuses",
+            "tld",
+            "tlds",
+            "tsigkey",
+            "tsigkeys",
+            "zone_export",
+            "zone_exports",
+            "zone_import",
+            "zone_imports",
+        }
+    ),
+    "image": frozenset({"image_member", "image_members", "member", "members"}),
+    "load-balancer": frozenset(
+        {
+            "healthmonitor",
+            "health_monitor",
+            "listener",
+            "member",
+            "pool",
+        }
+    ),
+    "orchestration": frozenset({"resource", "resources"}),
+}
+
+
+def _non_deletable_resource(service_type: str, resource_name: str) -> bool:
+    return (
+        resource_name in NON_DELETABLE_RESOURCE_NAMES
+        or resource_name
+        in NON_DELETABLE_RESOURCE_NAMES_BY_SERVICE.get(service_type, ())
+    )
+
+
+def _is_missing_resource_error(error: BaseException) -> bool:
+    """Return whether a list failure means this API resource is unavailable."""
+
+    text = _text(error).casefold()
+    return bool(
+        re.search(
+            r"\b404\b|not found|could not be found|resource could not be found",
+            text,
+        )
+    )
+
+
 # Some APIs expose project-owned objects without project_id in the SDK
 # resource model.  These names are only used after the request is made with a
 # project-scoped connection; they are not a service allow-list.
 PROJECT_SCOPED_EXCEPTIONS = {
     "application-container": {"container", "capsule"},
     "block-storage": {"group", "group_snapshot", "volume_transfer"},
-    "container-infrastructure-management": {"cluster", "cluster_template"},
-    "compute": {"keypair", "server_group"},
+    "container-infrastructure-management": {"cluster"},
+    "compute": set(),
     "database": {"backup", "cluster", "configuration", "instance", "module"},
     "key-manager": {"container", "order", "secret"},
-    "orchestration": {"software_config", "software_deployment", "stack"},
+    "orchestration": {"stack"},
     "shared-file-system": {"share", "share_group", "share_snapshot", "user_message"},
     "workflow": {"execution", "workflow"},
 }
@@ -551,6 +628,12 @@ def _jsonable(value: Any) -> Any:
 
 def _connection_as_project(connection: Any, project_id: str) -> Any:
     try:
+        # openstacksdk's connect_as_project treats a string as a project name;
+        # passing a UUID through connect_as therefore avoids an accidental
+        # name lookup and preserves the requested project scope.
+        connect_as = getattr(connection, "connect_as", None)
+        if callable(connect_as):
+            return connect_as(project_id=project_id)
         return connection.connect_as_project(project_id)
     except Exception as exc:
         raise InventoryError(
@@ -658,17 +741,85 @@ def _resource_attr(resource: Any, name: str) -> Any:
     return None
 
 
+def _link_project_value(resource: Any) -> Any:
+    links = _value(resource, "links")
+    if isinstance(links, Mapping):
+        links = [links]
+    if not isinstance(links, Iterable) or isinstance(links, (str, bytes)):
+        return None
+    project_pattern = re.compile(
+        r"/v\d+(?:\.\d+)?/([0-9a-f]{16,}(?:-[0-9a-f-]+)?)(?:/|$)",
+        re.IGNORECASE,
+    )
+    for link in links:
+        href = _value(link, "href")
+        match = project_pattern.search(_text(href)) if href else None
+        if match:
+            return match.group(1)
+    return None
+
+
 def _project_value(resource: Any) -> Any:
-    for field in ("project_id", "tenant_id", "owner"):
+    # Heat's ``user_project_id`` is the private stack-user project, not the
+    # project that owns the stack. Prefer the explicit/location project first
+    # and only use user_project_id as a fallback for APIs without that field.
+    for field in ("project_id", "tenant_id", "tenant", "owner"):
         value = _value(resource, field)
         if value is not None:
             return value
+    value = _link_project_value(resource)
+    if value is not None:
+        return value
+    project = _value(resource, "project")
+    if project is not None:
+        for field in ("id", "project_id", "tenant_id"):
+            value = _value(project, field)
+            if value is not None:
+                return value
+    location = _value(resource, "location")
+    location_project = _value(location, "project") if location is not None else None
+    if location_project is not None:
+        for field in ("id", "project_id", "tenant_id"):
+            value = _value(location_project, field)
+            if value is not None:
+                return value
+    value = _value(resource, "user_project_id")
+    if value is not None:
+        return value
     return None
 
 
 def _belongs_to_project(resource: Any, project_id: str) -> bool:
     value = _project_value(resource)
     return value is None or _text(value) == project_id
+
+
+def _filter_related_resources(
+    service_type: str,
+    resource_name: str,
+    objects: list[Any],
+    parents: Mapping[str, list[Any]],
+) -> list[Any]:
+    # Mistral exposes workflow executions through an administrator-wide
+    # collection even when the connection is project scoped.  An execution
+    # has no reliable project field, so retain only executions belonging to a
+    # workflow already owned by the requested project.
+    if service_type == "workflow" and resource_name in {
+        "execution",
+        "workflow_execution",
+    }:
+        workflows = parents.get("workflow", [])
+        workflow_ids = {
+            _text(_value(workflow, "id"))
+            for workflow in workflows
+            if _value(workflow, "id") is not None
+        }
+        return [
+            obj
+            for obj in objects
+            if _text(_value(obj, "workflow_id")) in workflow_ids
+        ]
+    return objects
 
 
 def _list_all(proxy: Any, resource_class: type, **kwargs: Any) -> list[Any]:
@@ -732,6 +883,8 @@ class BuiltinSDKProvider:
         for name, resource_class in self.resources.items():
             if name in GLOBAL_RESOURCE_NAMES and name not in exceptions:
                 continue
+            if _non_deletable_resource(self.endpoint.service_type, name):
+                continue
             placeholders = _resource_placeholders(resource_class)
             if placeholders:
                 continue
@@ -744,6 +897,8 @@ class BuiltinSDKProvider:
         exceptions = PROJECT_SCOPED_EXCEPTIONS.get(self.endpoint.service_type, set())
         for name, resource_class in self.resources.items():
             if name in GLOBAL_RESOURCE_NAMES and name not in exceptions:
+                continue
+            if _non_deletable_resource(self.endpoint.service_type, name):
                 continue
             placeholders = _resource_placeholders(resource_class)
             if self.endpoint.service_type == "object-store" and name == "object":
@@ -809,12 +964,24 @@ class BuiltinSDKProvider:
             try:
                 objects = self._list_spec(spec, project.project_id, objects_by_resource)
             except InventoryError as exc:
-                self.errors.append(_provider_error(spec.name, exc))
-                if strict:
+                if not _is_missing_resource_error(exc):
+                    self.errors.append(_provider_error(spec.name, exc))
+                if strict and not _is_missing_resource_error(exc):
                     raise
                 objects = []
             objects_by_resource[spec.name] = objects
             result[spec.name] = [_resource_to_dict(obj) for obj in objects]
+
+        for name, objects in list(objects_by_resource.items()):
+            filtered = _filter_related_resources(
+                self.endpoint.service_type,
+                name,
+                objects,
+                objects_by_resource,
+            )
+            objects_by_resource[name] = filtered
+            if name in result:
+                result[name] = [_resource_to_dict(obj) for obj in filtered]
 
         # Object-store objects are nested below containers and are not safely
         # discoverable from the generic registry without a container value.
@@ -834,30 +1001,33 @@ class BuiltinSDKProvider:
                     try:
                         containers = _list_all(self.proxy, container_class)
                     except InventoryError as exc:
-                        self.errors.append(_provider_error("container", exc))
-                        if strict:
+                        if not _is_missing_resource_error(exc):
+                            self.errors.append(_provider_error("container", exc))
+                        if strict and not _is_missing_resource_error(exc):
                             raise
                         containers = []
                     objects_by_resource["container"] = containers
                     result["container"] = [_resource_to_dict(obj) for obj in containers]
-                all_objects: list[Any] = []
+                all_objects: list[dict[str, Any]] = []
                 for container in containers:
                     container_name = _resource_attr(container, "container")
                     if container_name is None:
                         continue
                     try:
-                        all_objects.extend(
-                            _list_all(
-                                self.proxy,
-                                object_class,
-                                container=container_name,
-                            )
-                        )
+                        for obj in _list_all(
+                            self.proxy,
+                            object_class,
+                            container=container_name,
+                        ):
+                            serialized = _resource_to_dict(obj)
+                            serialized.setdefault("container", container_name)
+                            all_objects.append(serialized)
                     except InventoryError as exc:
-                        self.errors.append(_provider_error("object", exc))
-                        if strict:
+                        if not _is_missing_resource_error(exc):
+                            self.errors.append(_provider_error("object", exc))
+                        if strict and not _is_missing_resource_error(exc):
                             raise
-                result["object"] = [_resource_to_dict(obj) for obj in all_objects]
+                result["object"] = all_objects
 
         pending = self._nested_specs()
         while pending:
@@ -877,8 +1047,9 @@ class BuiltinSDKProvider:
                 try:
                     objects = self._list_spec(spec, project.project_id, objects_by_resource)
                 except InventoryError as exc:
-                    self.errors.append(_provider_error(spec.name, exc))
-                    if strict:
+                    if not _is_missing_resource_error(exc):
+                        self.errors.append(_provider_error(spec.name, exc))
+                    if strict and not _is_missing_resource_error(exc):
                         raise
                     objects = []
                 objects_by_resource[spec.name] = objects
@@ -969,6 +1140,9 @@ def _plugin_api_version(module: Any) -> str:
         configured = os.environ.get(environment_key)
         if configured:
             return configured
+    default_version = _text(getattr(module, "DEFAULT_API_VERSION", ""))
+    if default_version:
+        return default_version
     if isinstance(versions, Mapping) and versions:
         def version_key(value: str) -> tuple[tuple[int, Any], ...]:
             return tuple(
@@ -1036,6 +1210,7 @@ class LegacySDKProvider:
                 name.startswith("_")
                 or name in GLOBAL_RESOURCE_NAMES
                 or name in GLOBAL_LEGACY_MANAGER_NAMES
+                or _non_deletable_resource(self.endpoint.service_type, name)
             ):
                 continue
             manager = getattr(self.client, name, None)
@@ -1074,6 +1249,7 @@ class LegacySDKProvider:
     @staticmethod
     def _parent_argument(resource: Any, parameter_name: str) -> Any:
         if parameter_name.endswith("_name") or parameter_name in {
+            "container",
             "queue_name",
             "stack_name",
             "namespace_name",
@@ -1124,8 +1300,9 @@ class LegacySDKProvider:
                     f"listing legacy SDK resource {name!r} for service "
                     f"{self.endpoint.service_type!r} failed: {exc}"
                 )
-                self.errors.append(_provider_error(name, error))
-                if strict:
+                if not _is_missing_resource_error(error):
+                    self.errors.append(_provider_error(name, error))
+                if strict and not _is_missing_resource_error(error):
                     raise error from exc
                 objects_by_manager[name] = []
                 continue
@@ -1133,6 +1310,18 @@ class LegacySDKProvider:
             objects_by_manager[name] = values
             if values:
                 result[name] = [_resource_to_dict(value) for value in values]
+
+        for name, values in list(objects_by_manager.items()):
+            objects_by_manager[name] = _filter_related_resources(
+                self.endpoint.service_type,
+                name,
+                values,
+                objects_by_manager,
+            )
+            if name in result:
+                result[name] = [
+                    _resource_to_dict(value) for value in objects_by_manager[name]
+                ]
 
         unlisted_nested: list[str] = []
         for name, manager, signature in nested_managers:
@@ -1167,14 +1356,27 @@ class LegacySDKProvider:
                 try:
                     values = manager.list(*args, **kwargs)
                     if values:
-                        nested_values.extend(values)
+                        if (
+                            self.endpoint.service_type == "object-store"
+                            and _normalized_name(name) in {"object", "objects"}
+                        ):
+                            container_name = self._parent_argument(
+                                combination[0], required[0].name
+                            )
+                            for value in values:
+                                serialized = _resource_to_dict(value)
+                                serialized.setdefault("container", container_name)
+                                nested_values.append(serialized)
+                        else:
+                            nested_values.extend(values)
                 except Exception as exc:
                     error = InventoryError(
                         f"listing nested legacy SDK resource {name!r} for service "
                         f"{self.endpoint.service_type!r} failed: {exc}"
                     )
-                    self.errors.append(_provider_error(name, error))
-                    if strict:
+                    if not _is_missing_resource_error(error):
+                        self.errors.append(_provider_error(name, error))
+                    if strict and not _is_missing_resource_error(error):
                         raise error from exc
             objects_by_manager[name] = nested_values
             if nested_values:
@@ -1258,6 +1460,15 @@ def _generic_client_classes(endpoint: Endpoint) -> list[tuple[Any, Any]]:
                 )
                 if name.rsplit(".", 1)[-1] == "client"
             )
+        module_names = sorted(
+            set(module_names),
+            key=lambda name: (
+                -int(version.group(1))
+                if (version := re.search(r"\.v(\d+)(?:\.|$)", name))
+                else 1,
+                name,
+            ),
+        )
         for module_name in module_names:
             try:
                 module = importlib.import_module(module_name)
@@ -1324,18 +1535,26 @@ def resolve_provider(endpoint: Endpoint, connection: Any) -> Any:
     ]
     # An actual openstacksdk descriptor wins over a legacy CLI plugin.  The
     # descriptor is authoritative for service integrations maintained there.
-    if descriptions:
-        supported = [
-            description
-            for description in descriptions
-            if getattr(description, "supported_versions", {})
-        ]
-        if supported:
-            return BuiltinSDKProvider(endpoint, connection, supported[0])
+    supported = [
+        description
+        for description in descriptions
+        if getattr(description, "supported_versions", {})
+    ]
+    sdk_error: InventoryError | None = None
+    for description in supported:
+        try:
+            return BuiltinSDKProvider(endpoint, connection, description)
+        except InventoryError as exc:
+            # Some releases advertise a service descriptor but do not ship a
+            # usable version for the endpoint.  Give the installed legacy
+            # client a chance before reporting the service as unavailable.
+            sdk_error = exc
 
     provider = _legacy_provider(endpoint, connection)
     if provider is not None:
         return provider
+    if sdk_error is not None:
+        raise sdk_error
     provider = _generic_client_provider(endpoint, connection)
     if provider is not None:
         return provider

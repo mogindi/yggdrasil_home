@@ -384,6 +384,26 @@ files are tracked and removed when they are deleted from
    make openstack-project-resources PROJECT=admin
    ```
 
+   To delete a project resource inventory, save the strict JSON output and
+   review the ordered dry run first:
+
+   ```bash
+   scripts/openstack/list-project-resources.py --project demo --format json --strict > /tmp/demo-resources.json
+   scripts/openstack/delete-project-resources.py /tmp/demo-resources.json
+   scripts/openstack/delete-project-resources.py /tmp/demo-resources.json --yes
+   # equivalent Make target:
+   make openstack-project-resources-delete REPORT=/tmp/demo-resources.json ARGS=--yes
+   ```
+
+   The deletion utility removes workflow triggers and executions, workflows,
+   Heat stacks, Zun containers and capsules, then follows the existing
+   dependency order through compute, storage, networking, and security-group
+   resources. It refuses inventories with errors or unknown resource types and
+   can refresh and verify the inventory with `--project --yes --verify`. A
+   failed or incomplete inventory leaves the project in place for investigation;
+   this is intentional, because deletion cannot be considered safe until every
+   listed service has been inventoried.
+
    The CLI first reads the authenticated Keystone catalog through
    `openstacksdk` (the Python equivalent of `openstack endpoint list -f json`).
    It uses the core `openstack endpoint list -f json` command only as a
