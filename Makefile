@@ -152,7 +152,7 @@ openstack-manila:
 #	scripts/tests/manila.sh
 	ansible-playbook ansible/openstack_initialize/manila.yml $(VAULT_ARGS) $(ARGS)
 
-openstack-trove:
+openstack-trove: openstack-trove-mongodb-image
 #	scripts/tests/trove_postgres.sh
 	ansible-playbook ansible/openstack_initialize/trove.yml $(VAULT_ARGS) $(ARGS)
 
