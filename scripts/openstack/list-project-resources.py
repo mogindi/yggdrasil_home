@@ -21,12 +21,14 @@ because they are not part of this project-resource inventory.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import dataclasses
 import importlib
 import importlib.metadata
 import inspect
 import itertools
 import json
+import logging
 import os
 import pkgutil
 import re
@@ -77,6 +79,19 @@ class ResourceSpec:
 
 def _provider_error(resource_type: str, message: Any) -> dict[str, str]:
     return {"resource": resource_type, "error": _text(message)}
+
+
+@contextlib.contextmanager
+def _suppress_error_logs(enabled: bool) -> Any:
+    if not enabled:
+        yield
+        return
+    previous_disable_level = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        yield
+    finally:
+        logging.disable(previous_disable_level)
 
 
 # These catalog services are enabled in the deployment but are not included
@@ -1507,6 +1522,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail instead of returning a partial inventory when a client or resource request fails.",
     )
+    parser.add_argument(
+        "--hide-errors",
+        action="store_true",
+        help="Hide client/resource errors and SDK error logs from the output.",
+    )
     parser.add_argument("--debug", action="store_true", help="Show a traceback on failure.")
     return parser
 
@@ -1514,18 +1534,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        # Use the SDK's authenticated Keystone catalog first.  The core CLI
-        # remains an equivalent fallback for unusual SDK/catalog failures.
-        connection = _connect(args.interface, args.region)
-        endpoints = discover_endpoints(connection, args.openstack_bin)
-        endpoints = select_endpoints(endpoints, args.interface, args.region)
-        project = resolve_project(connection, args.project)
-        report = inventory(endpoints, connection, project, strict=args.strict)
+        with _suppress_error_logs(args.hide_errors):
+            # Use the SDK's authenticated Keystone catalog first.  The core
+            # CLI remains an equivalent fallback for unusual SDK/catalog
+            # failures.
+            connection = _connect(args.interface, args.region)
+            endpoints = discover_endpoints(connection, args.openstack_bin)
+            endpoints = select_endpoints(endpoints, args.interface, args.region)
+            project = resolve_project(connection, args.project)
+            report = inventory(endpoints, connection, project, strict=args.strict)
+        has_errors = bool(report.get("errors"))
+        if args.hide_errors:
+            report = {
+                key: value for key, value in report.items() if key != "errors"
+            }
         if args.format == "json":
             print(json.dumps(report, indent=2, sort_keys=True))
         else:
             print(render_table(report))
-        return 2 if args.strict and report.get("errors") else 0
+        return 2 if args.strict and has_errors else 0
     except InventoryError as exc:
         if args.debug:
             raise

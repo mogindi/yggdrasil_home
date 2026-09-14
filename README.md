@@ -378,6 +378,7 @@ files are tracked and removed when they are deleted from
    source workspace/kolla-venv/bin/activate
    scripts/openstack/list-project-resources.py --project admin
    scripts/openstack/list-project-resources.py --project admin --format json
+   scripts/openstack/list-project-resources.py --project admin --hide-errors
    scripts/openstack/list-project-resources.py --project admin --strict
    # equivalent Make target:
    make openstack-project-resources PROJECT=admin
@@ -390,11 +391,13 @@ files are tracked and removed when they are deleted from
    endpoint to an installed `openstacksdk` service proxy or legacy Python
    client and enumerates its project-scoped resources. By default, it
    continues when a client or individual resource request fails and includes
-   the failure in the table or JSON `errors` field. Use `--strict` to make
-   those failures nonzero. New services integrated into `openstacksdk` or
-   registered as OpenStack client plugins are discovered without editing this
-   script. The deployment's `panel`, `LMS`, `cloudformation`, and Gnocchi
-   catalog endpoints are intentionally ignored because they are dashboard,
+   the failure in the table or JSON `errors` field. Use `--hide-errors` to
+   omit those reported errors and SDK error logs from the output, or
+   `--strict` to make them nonzero. New services integrated into
+   `openstacksdk` or registered as OpenStack client plugins are discovered
+   without editing this script. The deployment's `panel`, `LMS`,
+   `cloudformation`, and Gnocchi catalog endpoints are intentionally ignored
+   because they are dashboard,
    metrics, or compatibility APIs, rather than project-resource services.
 
 10. **Operate and maintain**
@@ -535,7 +538,8 @@ Below is a complete catalog of Make targets in this repo.
   using the Python SDKs discovered from the endpoint catalog. Pass
   `ARGS="--format json"` for machine-readable output; resource failures are
   reported while other resources continue. Pass `ARGS="--strict"` to make
-  client and list failures hard errors.
+  client and list failures hard errors, or `ARGS="--hide-errors"` to omit
+  reported errors and SDK error logs from the output.
 - `openstack-resources-init` — initializes OpenStack resources.
 - `openstack-images-upload` — uploads the default cloud image set. When run with
   `ENV=aio`, this target uploads only the Ubuntu Noble image; the Magnum

@@ -9,10 +9,12 @@ when a deployment advertises a service for which no client is installed.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import sys
 import types
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -397,6 +399,39 @@ class InventoryTests(unittest.TestCase):
         )
 
         self.assertIn("backup / actions: Error 404: Not Found", output)
+
+    def test_hide_errors_removes_errors_from_json_output(self) -> None:
+        report = {
+            "project": {"id": "project-1", "name": "Project"},
+            "endpoints": [],
+            "providers": {},
+            "resources": {},
+            "errors": [
+                {
+                    "service": "backup",
+                    "resource": "actions",
+                    "error": "Error 404: Not Found",
+                }
+            ],
+        }
+        output = io.StringIO()
+
+        with mock.patch.object(inventory, "_connect", return_value=object()), \
+             mock.patch.object(inventory, "discover_endpoints", return_value=[]), \
+             mock.patch.object(inventory, "select_endpoints", return_value=[]), \
+             mock.patch.object(
+                 inventory,
+                 "resolve_project",
+                 return_value=inventory.Project("project-1", "Project", {}),
+             ), \
+             mock.patch.object(inventory, "inventory", return_value=report):
+            with redirect_stdout(output):
+                status = inventory.main(
+                    ["--project", "admin", "--format", "json", "--hide-errors"]
+                )
+
+        self.assertEqual(status, 0)
+        self.assertNotIn("errors", json.loads(output.getvalue()))
 
 
 if __name__ == "__main__":
