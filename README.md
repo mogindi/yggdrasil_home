@@ -393,9 +393,9 @@ files are tracked and removed when they are deleted from
    the failure in the table or JSON `errors` field. Use `--strict` to make
    those failures nonzero. New services integrated into `openstacksdk` or
    registered as OpenStack client plugins are discovered without editing this
-   script. The deployment's `panel`, `LMS`, and `cloudformation` catalog
-   endpoints are intentionally ignored because they are dashboard or
-   compatibility APIs, rather than project-resource services.
+   script. The deployment's `panel`, `LMS`, `cloudformation`, and Gnocchi
+   catalog endpoints are intentionally ignored because they are dashboard,
+   metrics, or compatibility APIs, rather than project-resource services.
 
 10. **Operate and maintain**
     - Reconfigure services after variable updates:

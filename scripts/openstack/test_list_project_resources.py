@@ -141,6 +141,15 @@ class EndpointTests(unittest.TestCase):
                 "https://skyline.example/",
             ),
             inventory.Endpoint(
+                "gnocchi",
+                "RegionOne",
+                "Gnocchi",
+                "metric",
+                "metric",
+                "public",
+                "https://gnocchi.example/",
+            ),
+            inventory.Endpoint(
                 "compute",
                 "RegionOne",
                 "nova",

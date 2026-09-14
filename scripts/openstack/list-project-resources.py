@@ -13,9 +13,9 @@ failures are included in the report and do not prevent other resources from
 being listed.  Use ``--strict`` when an incomplete inventory should be a hard
 failure.
 
-The deployment-specific dashboard and compatibility endpoints for ``panel``,
-``LMS``, and ``cloudformation`` are intentionally excluded because they are
-not part of this project-resource inventory.
+The deployment-specific dashboard, metrics, and compatibility endpoints for
+``panel``, ``LMS``, ``cloudformation``, and Gnocchi are intentionally excluded
+because they are not part of this project-resource inventory.
 """
 
 from __future__ import annotations
@@ -80,16 +80,22 @@ def _provider_error(resource_type: str, message: Any) -> dict[str, str]:
 
 
 # These catalog services are enabled in the deployment but are not included
-# in the project-resource inventory.  Match both the canonical and raw type so
-# aliases such as an uppercase ``LMS`` remain excluded if service-type
-# canonicalization changes.
-IGNORED_SERVICE_TYPES = frozenset({"cloudformation", "lms", "panel"})
+# in the project-resource inventory.  Match the service type and name so
+# aliases such as an uppercase ``LMS`` or a Gnocchi ``metric`` type remain
+# excluded if service-type canonicalization changes.
+IGNORED_SERVICE_TYPES = frozenset(
+    {"cloudformation", "gnocchi", "lms", "metric", "panel"}
+)
 
 
 def _is_ignored_endpoint(endpoint: Endpoint) -> bool:
     return any(
         _text(value).strip().casefold() in IGNORED_SERVICE_TYPES
-        for value in (endpoint.service_type, endpoint.raw_service_type)
+        for value in (
+            endpoint.service_type,
+            endpoint.raw_service_type,
+            endpoint.service_name,
+        )
     )
 
 
