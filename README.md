@@ -391,7 +391,10 @@ files are tracked and removed when they are deleted from
    endpoint has no matching list-capable client or if a client/list request
    fails, so the output is never presented as a complete inventory when it is
    partial. New services integrated into `openstacksdk` or registered as
-   OpenStack client plugins are discovered without editing this script.
+   OpenStack client plugins are discovered without editing this script. The
+   deployment's `panel`, `LMS`, and `cloudformation` catalog endpoints are
+   intentionally ignored because they are dashboard or compatibility APIs,
+   rather than project-resource services.
 
 10. **Operate and maintain**
     - Reconfigure services after variable updates:

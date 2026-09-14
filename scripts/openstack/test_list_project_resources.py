@@ -111,6 +111,50 @@ class EndpointTests(unittest.TestCase):
         selected = inventory.select_endpoints(endpoints, "public", "RegionOne")
         self.assertEqual([endpoint.url for endpoint in selected], ["new"])
 
+    def test_ignored_service_types_are_not_selected(self) -> None:
+        endpoints = [
+            inventory.Endpoint(
+                "heat-cfn",
+                "RegionOne",
+                "heat-cfn",
+                "cloudformation",
+                "cloudformation",
+                "public",
+                "https://heat-cfn.example/",
+            ),
+            inventory.Endpoint(
+                "venus",
+                "RegionOne",
+                "venus",
+                "LMS",
+                "lms",
+                "public",
+                "https://venus.example/",
+            ),
+            inventory.Endpoint(
+                "skyline",
+                "RegionOne",
+                "skyline",
+                "panel",
+                "panel",
+                "public",
+                "https://skyline.example/",
+            ),
+            inventory.Endpoint(
+                "compute",
+                "RegionOne",
+                "nova",
+                "compute",
+                "compute",
+                "public",
+                "https://nova.example/",
+            ),
+        ]
+
+        selected = inventory.select_endpoints(endpoints, "public", "RegionOne")
+
+        self.assertEqual([endpoint.service_type for endpoint in selected], ["compute"])
+
 
 class ProviderTests(unittest.TestCase):
     def test_service_descriptor_does_not_match_unrelated_endpoint(self) -> None:

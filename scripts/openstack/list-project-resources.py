@@ -11,6 +11,10 @@ legacy client SDKs as a fallback.
 The command fails if an enabled, selected endpoint cannot be mapped to a
 list-capable Python client, or if any resource request fails.  This prevents a
 successful-looking report from hiding an incomplete inventory.
+
+The deployment-specific dashboard and compatibility endpoints for ``panel``,
+``LMS``, and ``cloudformation`` are intentionally excluded because they are
+not part of this project-resource inventory.
 """
 
 from __future__ import annotations
@@ -68,6 +72,20 @@ class ResourceSpec:
     name: str
     resource_class: type
     placeholders: tuple[str, ...]
+
+
+# These catalog services are enabled in the deployment but are not included
+# in the project-resource inventory.  Match both the canonical and raw type so
+# aliases such as an uppercase ``LMS`` remain excluded if service-type
+# canonicalization changes.
+IGNORED_SERVICE_TYPES = frozenset({"cloudformation", "lms", "panel"})
+
+
+def _is_ignored_endpoint(endpoint: Endpoint) -> bool:
+    return any(
+        _text(value).strip().casefold() in IGNORED_SERVICE_TYPES
+        for value in (endpoint.service_type, endpoint.raw_service_type)
+    )
 
 
 GLOBAL_RESOURCE_NAMES = {
@@ -378,7 +396,11 @@ def select_endpoints(
     """Choose one endpoint per service type for the requested interface/region."""
 
     interface = normalize_interface(interface)
-    candidates = [endpoint for endpoint in endpoints if endpoint.enabled]
+    candidates = [
+        endpoint
+        for endpoint in endpoints
+        if endpoint.enabled and not _is_ignored_endpoint(endpoint)
+    ]
     if region:
         candidates = [endpoint for endpoint in candidates if endpoint.region == region]
     if not candidates:
@@ -1261,6 +1283,7 @@ def inventory(
     connection: Any,
     project: Project,
 ) -> dict[str, Any]:
+    endpoints = [endpoint for endpoint in endpoints if not _is_ignored_endpoint(endpoint)]
     target_connection = _as_project_connection(connection, project)
 
     # Resolve every selected endpoint before making resource calls.  This is
