@@ -286,11 +286,11 @@ def _is_missing_resource_error(error: BaseException) -> bool:
 PROJECT_SCOPED_EXCEPTIONS = {
     "application-container": {"container", "capsule"},
     "block-storage": {"group", "group_snapshot", "volume_transfer"},
-    "container-infrastructure-management": {"cluster", "cluster_template"},
-    "compute": {"keypair", "server_group"},
+    "container-infrastructure-management": {"cluster"},
+    "compute": set(),
     "database": {"backup", "cluster", "configuration", "instance", "module"},
     "key-manager": {"container", "order", "secret"},
-    "orchestration": {"software_config", "software_deployment", "stack"},
+    "orchestration": {"stack"},
     "shared-file-system": {"share", "share_group", "share_snapshot", "user_message"},
     "workflow": {"execution", "workflow"},
 }
@@ -628,6 +628,12 @@ def _jsonable(value: Any) -> Any:
 
 def _connection_as_project(connection: Any, project_id: str) -> Any:
     try:
+        # openstacksdk's connect_as_project treats a string as a project name;
+        # passing a UUID through connect_as therefore avoids an accidental
+        # name lookup and preserves the requested project scope.
+        connect_as = getattr(connection, "connect_as", None)
+        if callable(connect_as):
+            return connect_as(project_id=project_id)
         return connection.connect_as_project(project_id)
     except Exception as exc:
         raise InventoryError(
@@ -735,17 +741,85 @@ def _resource_attr(resource: Any, name: str) -> Any:
     return None
 
 
+def _link_project_value(resource: Any) -> Any:
+    links = _value(resource, "links")
+    if isinstance(links, Mapping):
+        links = [links]
+    if not isinstance(links, Iterable) or isinstance(links, (str, bytes)):
+        return None
+    project_pattern = re.compile(
+        r"/v\d+(?:\.\d+)?/([0-9a-f]{16,}(?:-[0-9a-f-]+)?)(?:/|$)",
+        re.IGNORECASE,
+    )
+    for link in links:
+        href = _value(link, "href")
+        match = project_pattern.search(_text(href)) if href else None
+        if match:
+            return match.group(1)
+    return None
+
+
 def _project_value(resource: Any) -> Any:
-    for field in ("project_id", "tenant_id", "owner"):
+    # Heat's ``user_project_id`` is the private stack-user project, not the
+    # project that owns the stack. Prefer the explicit/location project first
+    # and only use user_project_id as a fallback for APIs without that field.
+    for field in ("project_id", "tenant_id", "tenant", "owner"):
         value = _value(resource, field)
         if value is not None:
             return value
+    value = _link_project_value(resource)
+    if value is not None:
+        return value
+    project = _value(resource, "project")
+    if project is not None:
+        for field in ("id", "project_id", "tenant_id"):
+            value = _value(project, field)
+            if value is not None:
+                return value
+    location = _value(resource, "location")
+    location_project = _value(location, "project") if location is not None else None
+    if location_project is not None:
+        for field in ("id", "project_id", "tenant_id"):
+            value = _value(location_project, field)
+            if value is not None:
+                return value
+    value = _value(resource, "user_project_id")
+    if value is not None:
+        return value
     return None
 
 
 def _belongs_to_project(resource: Any, project_id: str) -> bool:
     value = _project_value(resource)
     return value is None or _text(value) == project_id
+
+
+def _filter_related_resources(
+    service_type: str,
+    resource_name: str,
+    objects: list[Any],
+    parents: Mapping[str, list[Any]],
+) -> list[Any]:
+    # Mistral exposes workflow executions through an administrator-wide
+    # collection even when the connection is project scoped.  An execution
+    # has no reliable project field, so retain only executions belonging to a
+    # workflow already owned by the requested project.
+    if service_type == "workflow" and resource_name in {
+        "execution",
+        "workflow_execution",
+    }:
+        workflows = parents.get("workflow", [])
+        workflow_ids = {
+            _text(_value(workflow, "id"))
+            for workflow in workflows
+            if _value(workflow, "id") is not None
+        }
+        return [
+            obj
+            for obj in objects
+            if _text(_value(obj, "workflow_id")) in workflow_ids
+        ]
+    return objects
 
 
 def _list_all(proxy: Any, resource_class: type, **kwargs: Any) -> list[Any]:
@@ -897,6 +971,17 @@ class BuiltinSDKProvider:
                 objects = []
             objects_by_resource[spec.name] = objects
             result[spec.name] = [_resource_to_dict(obj) for obj in objects]
+
+        for name, objects in list(objects_by_resource.items()):
+            filtered = _filter_related_resources(
+                self.endpoint.service_type,
+                name,
+                objects,
+                objects_by_resource,
+            )
+            objects_by_resource[name] = filtered
+            if name in result:
+                result[name] = [_resource_to_dict(obj) for obj in filtered]
 
         # Object-store objects are nested below containers and are not safely
         # discoverable from the generic registry without a container value.
@@ -1225,6 +1310,18 @@ class LegacySDKProvider:
             objects_by_manager[name] = values
             if values:
                 result[name] = [_resource_to_dict(value) for value in values]
+
+        for name, values in list(objects_by_manager.items()):
+            objects_by_manager[name] = _filter_related_resources(
+                self.endpoint.service_type,
+                name,
+                values,
+                objects_by_manager,
+            )
+            if name in result:
+                result[name] = [
+                    _resource_to_dict(value) for value in objects_by_manager[name]
+                ]
 
         unlisted_nested: list[str] = []
         for name, manager, signature in nested_managers:

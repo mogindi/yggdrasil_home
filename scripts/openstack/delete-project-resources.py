@@ -150,7 +150,9 @@ RESOURCE_ALIASES = {
 # executions) are removed before their child resources, and networking is
 # removed last.
 RESOURCE_PHASES = {
-    ("identity", "trust"): 5,
+    # Heat stacks use Keystone trusts for deferred cleanup, so trusts must
+    # remain until every service resource (especially Heat) is gone.
+    ("identity", "trust"): 200,
     ("workflow", "event_trigger"): 10,
     ("workflow", "cron_trigger"): 10,
     ("workflow", "action_execution"): 15,
@@ -575,7 +577,16 @@ def wait_for_stack_delete(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         completed = subprocess.run(
-            [openstack_bin, "stack", "show", stack_id],
+            [
+                openstack_bin,
+                "stack",
+                "show",
+                stack_id,
+                "-f",
+                "value",
+                "-c",
+                "stack_status",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -585,6 +596,11 @@ def wait_for_stack_delete(
             return None
         if completed.returncode != 0:
             return output or f"exit code {completed.returncode}"
+        status = completed.stdout.strip().casefold()
+        if status == "delete_complete":
+            return None
+        if status == "delete_failed":
+            return output or "stack deletion failed"
         time.sleep(poll_seconds)
     return f"stack remained visible after {timeout:.0f} seconds"
 

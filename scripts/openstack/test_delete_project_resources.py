@@ -52,6 +52,7 @@ class PlanningTests(unittest.TestCase):
                     "execution": [{"id": "execution-1"}],
                     "cron_trigger": [{"name": "trigger-1"}],
                 },
+                "identity": {"trust": [{"id": "trust-1"}]},
             }
         )
 
@@ -76,6 +77,7 @@ class PlanningTests(unittest.TestCase):
                 ("subnet", "subnet-1"),
                 ("network", "net-1"),
                 ("security_group", "sg-1"),
+                ("trust", "trust-1"),
             ],
         )
 
@@ -232,6 +234,23 @@ class PlanningTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+    @mock.patch.object(deleter.time, "sleep")
+    @mock.patch.object(deleter, "subprocess")
+    def test_heat_delete_wait_accepts_delete_complete_status(
+        self, subprocess_module, sleep
+    ):
+        subprocess_module.run.side_effect = [
+            mock.Mock(returncode=0, stdout="DELETE_IN_PROGRESS\n", stderr=""),
+            mock.Mock(returncode=0, stdout="DELETE_COMPLETE\n", stderr=""),
+        ]
+
+        error = deleter.wait_for_stack_delete(
+            "openstack", "stack-1", timeout=10, poll_seconds=1
+        )
+
+        self.assertIsNone(error)
+        sleep.assert_called_once_with(1)
+
     @mock.patch.object(deleter, "subprocess")
     def test_router_ports_are_removed_before_router_delete(self, subprocess_module):
         subprocess_module.run.side_effect = [
