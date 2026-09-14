@@ -32,6 +32,9 @@ pip install -U -c https://releases.openstack.org/constraints/upper/$OPENSTACK_RE
   python-octaviaclient \
   python-barbicanclient \
   python-freezerclient==6.1.0 \
+  python-watcherclient \
+  python-tackerclient \
+  python-venusclient \
   python-senlinclient \
   python-masakariclient
 
