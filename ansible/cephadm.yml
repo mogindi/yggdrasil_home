@@ -355,10 +355,48 @@
     - name: Add pools
       script: "{{ playbook_dir }}/../scripts/cephadm/pools.sh"
       args:
-        creates: /root/cephadm_pools.done
+        # Version the marker because the original pool script did not create
+        # the Gnocchi pool. This makes the migration idempotently run once on
+        # existing clusters as well as on fresh deployments.
+        creates: /root/cephadm_pools_v2.done
       run_once: true
       environment:
         CEPHADM_IMAGE: "{{ ceph_image }}"
+        CEPHADM_POOLS_MARKER: /root/cephadm_pools_v2.done
+        CEPH_GNOCCHI_POOL_NAME: "{{ ceph_gnocchi_pool_name | default('gnocchi') }}"
+        CEPH_GNOCCHI_POOL_SIZE: "{{ ceph_gnocchi_pool_size | default(storage_ceph_default_pool_size) }}"
+        CEPH_GNOCCHI_POOL_MIN_SIZE: "{{ ceph_gnocchi_pool_min_size | default(storage_ceph_default_min_pool_size) }}"
+
+    - name: Ensure Gnocchi Ceph client has pool-scoped permissions
+      command: >-
+        {{ ceph_cli }} auth get-or-create client.{{ ceph_gnocchi_user | default('gnocchi') }}
+        mon 'allow r'
+        osd 'allow rwx pool={{ ceph_gnocchi_pool_name | default('gnocchi') }}'
+      changed_when: false
+      no_log: true
+
+    - name: Set Gnocchi Ceph client capabilities
+      command: >-
+        {{ ceph_cli }} auth caps client.{{ ceph_gnocchi_user | default('gnocchi') }}
+        mon 'allow r'
+        osd 'allow rwx pool={{ ceph_gnocchi_pool_name | default('gnocchi') }}'
+      changed_when: false
+      no_log: true
+
+    - name: Read Gnocchi Ceph client keyring
+      command: "{{ ceph_cli }} auth get client.{{ ceph_gnocchi_user | default('gnocchi') }}"
+      register: gnocchi_ceph_keyring
+      changed_when: false
+      no_log: true
+
+    - name: Distribute Gnocchi Ceph client keyring
+      copy:
+        content: "{{ gnocchi_ceph_keyring.stdout }}\n"
+        dest: "/etc/ceph/ceph.client.{{ ceph_gnocchi_user | default('gnocchi') }}.keyring"
+        mode: '0600'
+      delegate_to: "{{ item }}"
+      loop: "{{ (groups['deployment_nodes'] + groups['deployment_controller']) | unique }}"
+      no_log: true
 
       # need default 8443 on node for nova console proxy. Only possibility on the same dns host if ur using cloudflare
     - name: Change mgr dashboard port

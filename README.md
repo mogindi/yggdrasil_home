@@ -434,6 +434,28 @@ Production notes:
 
 ---
 
+## Gnocchi metric storage
+
+Gnocchi is configured to use the native Ceph backend for aggregate metrics.
+The 2025.2 deployment also uses the Valkey Sentinel cluster for incoming
+measures and coordination. The Ceph pool and dedicated `client.gnocchi`
+keyring are created by `cephadm-deploy` and distributed to the deployment and
+OpenStack nodes before Kolla is configured.
+
+The AIO inventory deliberately keeps the Gnocchi pool at replica size one.
+Multi-node inventories must set `ceph_gnocchi_pool_size` and
+`ceph_gnocchi_pool_min_size` for their Ceph failure domains; a typical
+three-node production cluster uses `3` and `2` respectively. A two-node lab
+profile uses `2` and `1`.
+
+Changing from the old file backend does not migrate existing aggregate files.
+Back up the Gnocchi database and `/var/lib/gnocchi` before deployment. For
+noncritical telemetry, existing history can be left behind and new measures
+will populate Ceph; history that must be retained needs an explicit export and
+re-ingest procedure.
+
+---
+
 ## Disk cleanup
 
 Use `ansible/free_disk_space.yml` for disk cleanup across a multi-node

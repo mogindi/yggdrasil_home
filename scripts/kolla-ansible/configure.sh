@@ -13,6 +13,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED:=no}"
 : "${OPENSTACK_NETWORK_GUARD_ENABLED:=no}"
 : "${OPENSTACK_CEPH_RGW_VIP_PORT:=6780}"
+: "${OPENSTACK_CEPH_GNOCCHI_USER:=gnocchi}"
+: "${OPENSTACK_CEPH_GNOCCHI_POOL_NAME:=gnocchi}"
 
 is_enabled() {
 	case "${1,,}" in
@@ -111,6 +113,18 @@ set_global_config enable_freezer yes
 # Sentinel cluster for both message and management storage.
 set_global_config enable_zaqar yes
 set_global_config enable_gnocchi yes
+# Store Gnocchi aggregates in the shared Ceph cluster instead of the
+# node-local /var/lib/gnocchi volume. On 2025.2, Valkey is also used for
+# incoming measures and the tooz coordinator; older Kolla releases leave the
+# incoming driver at its default while still using the Ceph aggregate backend.
+set_global_config gnocchi_backend_storage ceph
+set_global_config ceph_gnocchi_user "$OPENSTACK_CEPH_GNOCCHI_USER"
+set_global_config ceph_gnocchi_pool_name "$OPENSTACK_CEPH_GNOCCHI_POOL_NAME"
+case "${OPENSTACK_RELEASE:-}" in
+	2025.2|2026.*)
+		set_global_config gnocchi_incoming_storage valkey
+		;;
+esac
 set_global_config enable_grafana yes
 set_global_config enable_kuryr yes
 set_global_config enable_magnum yes
@@ -201,6 +215,20 @@ for service in glance nova cinder/cinder-volume cinder/cinder-backup; do
 	cp /etc/ceph/ceph.client.admin.keyring etc/kolla/config/$service/
 	cat /etc/ceph/ceph.conf | sed 's/^\t//g' > etc/kolla/config/$service/ceph.conf
 done
+
+# Kolla's native Ceph Gnocchi backend reads the cluster directly through
+# librados. It does not use the Ceph RGW/S3 endpoint, so both the cluster
+# configuration and the dedicated client keyring must be available to every
+# Gnocchi container.
+gnocchi_config_dir="$CONFIG_DIR/config/gnocchi"
+gnocchi_keyring="/etc/ceph/ceph.client.${OPENSTACK_CEPH_GNOCCHI_USER}.keyring"
+if [[ ! -f /etc/ceph/ceph.conf || ! -f "$gnocchi_keyring" ]]; then
+	echo "Gnocchi Ceph backend requires /etc/ceph/ceph.conf and $gnocchi_keyring" >&2
+	exit 1
+fi
+mkdir -p "$gnocchi_config_dir"
+cat /etc/ceph/ceph.conf | sed 's/^\t//g' > "$gnocchi_config_dir/ceph.conf"
+cp "$gnocchi_keyring" "$gnocchi_config_dir/ceph.client.${OPENSTACK_CEPH_GNOCCHI_USER}.keyring"
 
 # magnum
 cat > etc/kolla/config/magnum.conf <<EOF

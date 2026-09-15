@@ -70,6 +70,13 @@ storage_ceph_osd_devices:
   - /dev/vg-2/lv-2
 storage_ceph_default_pool_size: 1
 storage_ceph_default_min_pool_size: "{{ storage_ceph_default_pool_size }}"
+# Gnocchi uses a dedicated native Ceph pool/client. AIO remains intentionally
+# non-redundant; multi-node inventories should override these to match their
+# Ceph failure domains (normally size 3/min_size 2).
+ceph_gnocchi_user: gnocchi
+ceph_gnocchi_pool_name: gnocchi
+ceph_gnocchi_pool_size: "{{ storage_ceph_default_pool_size }}"
+ceph_gnocchi_pool_min_size: "{{ storage_ceph_default_min_pool_size }}"
 storage_ceph_osd_discard: true
 # AIO has one failure domain, so its development pools intentionally have no
 # replica. Suppress the corresponding health warning without changing pool size.
