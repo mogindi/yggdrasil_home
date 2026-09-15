@@ -162,6 +162,12 @@ class PlanningTests(unittest.TestCase):
                     "resource": [{"id": "stack-resource-1"}],
                     "stack": [{"id": "stack-1"}],
                 },
+                "compute": {
+                    "server_action": [{"id": "server-action-1"}],
+                    "server_interface": [{"id": "server-interface-1"}],
+                    "server_ip": [{"id": "server-ip-1"}],
+                    "server": [{"id": "server-1"}],
+                },
             }
         )
 
@@ -170,7 +176,12 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(issues, [])
         self.assertEqual(
             [(operation.resource.resource, operation.resource.identifier) for operation in operations],
-            [("stack", "stack-1"), ("container", "container-1"), ("load_balancer", "lb-1")],
+            [
+                ("stack", "stack-1"),
+                ("container", "container-1"),
+                ("load_balancer", "lb-1"),
+                ("server", "server-1"),
+            ],
         )
 
     def test_service_parents_follow_their_children(self):
@@ -234,6 +245,13 @@ class PlanningTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_missing_router_interface_is_treated_as_already_removed(self):
+        self.assertTrue(
+            deleter._missing_output(
+                "Router router-1 does not have an interface with id port-1"
+            )
+        )
+
     @mock.patch.object(deleter.time, "sleep")
     @mock.patch.object(deleter, "subprocess")
     def test_heat_delete_wait_accepts_delete_complete_status(

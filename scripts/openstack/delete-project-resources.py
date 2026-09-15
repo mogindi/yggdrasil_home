@@ -226,6 +226,9 @@ COVERED_CHILD_RESOURCES = {
     ("load-balancer", "member"),
     ("load-balancer", "pool"),
     ("orchestration", "resource"),
+    ("compute", "server_action"),
+    ("compute", "server_interface"),
+    ("compute", "server_ip"),
 }
 
 
@@ -506,7 +509,8 @@ def _missing_output(output: str) -> bool:
     text = output.casefold()
     return bool(
         re.search(
-            r"not found|no .* found|404 not found|does not exist|could not be found",
+            r"not found|no .* found|404 not found|does not exist|could not be found|"
+            r"does not have an interface",
             text,
         )
     )

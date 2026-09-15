@@ -152,6 +152,24 @@ class EndpointTests(unittest.TestCase):
                 "https://gnocchi.example/",
             ),
             inventory.Endpoint(
+                "masakari",
+                "RegionOne",
+                "masakari",
+                "instance-ha",
+                "instance-ha",
+                "public",
+                "https://masakari.example/",
+            ),
+            inventory.Endpoint(
+                "tacker",
+                "RegionOne",
+                "tacker",
+                "nfv-orchestration",
+                "nfv-orchestration",
+                "public",
+                "https://tacker.example/",
+            ),
+            inventory.Endpoint(
                 "compute",
                 "RegionOne",
                 "nova",
@@ -168,6 +186,51 @@ class EndpointTests(unittest.TestCase):
 
 
 class ProviderTests(unittest.TestCase):
+    def test_default_security_group_and_rules_are_left_for_project_delete(self) -> None:
+        objects_by_resource = {
+            "security_group": [
+                {"id": "default", "name": "default"},
+                {"id": "custom", "name": "custom"},
+            ],
+            "security_group_rule": [
+                {"id": "default-rule", "security_group_id": "default"},
+                {"id": "custom-rule", "security_group_id": "custom"},
+            ],
+        }
+        result = {name: list(values) for name, values in objects_by_resource.items()}
+
+        inventory._exclude_default_security_group(objects_by_resource, result)
+
+        self.assertEqual([item["id"] for item in objects_by_resource["security_group"]], ["custom"])
+        self.assertEqual(
+            [item["id"] for item in objects_by_resource["security_group_rule"]],
+            ["custom-rule"],
+        )
+
+    @mock.patch.object(inventory, "_list_all")
+    def test_project_filter_falls_back_when_service_rejects_it(
+        self, list_all: mock.Mock
+    ) -> None:
+        list_all.side_effect = [
+            inventory.InventoryError("Invalid filters project_id are found in query options"),
+            [{"id": "backup-1", "project_id": "project-1"}],
+        ]
+        provider = inventory.BuiltinSDKProvider.__new__(inventory.BuiltinSDKProvider)
+        provider.proxy = object()
+        resource_class = type("Backup", (), {})
+
+        result = provider._list_with_project_filter_fallback(
+            resource_class,
+            {"project_id": "project-1"},
+            {"project_id": "project-1"},
+        )
+
+        self.assertEqual(result, [{"id": "backup-1", "project_id": "project-1"}])
+        self.assertEqual(
+            [call.kwargs for call in list_all.call_args_list],
+            [{"project_id": "project-1"}, {}],
+        )
+
     def test_project_connection_uses_project_id_not_project_name(self) -> None:
         connection = mock.Mock()
         connection.connect_as.return_value = "scoped"
@@ -323,6 +386,28 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(result["resources"][0]["project_id"], "project-1")
         self.assertEqual(provider.client.resources.arguments, ("project-1", False))
 
+    def test_zun_container_manager_gets_project_filter_via_kwargs(self) -> None:
+        class ContainerManager:
+            def list(self, all_projects=False, **kwargs):
+                self.arguments = (all_projects, kwargs)
+                return [{"uuid": "container-1", "project_id": "project-1"}]
+
+        provider = inventory.LegacySDKProvider.__new__(inventory.LegacySDKProvider)
+        provider.endpoint = inventory.Endpoint(
+            "zun", "RegionOne", "zun", "application-container", "application-container", "public", "zun"
+        )
+        provider.module = types.SimpleNamespace(__name__="zunclient.osc.plugin")
+        provider.name = "zunclient.osc.plugin (legacy SDK)"
+        provider.client = types.SimpleNamespace(containers=ContainerManager())
+
+        result = provider.collect(inventory.Project("project-1", "Project", {}))
+
+        self.assertEqual(result["containers"][0]["uuid"], "container-1")
+        self.assertEqual(
+            provider.client.containers.arguments,
+            (False, {"project_id": "project-1"}),
+        )
+
     def test_legacy_provider_traverses_nested_manager_collections(self) -> None:
         class ContainerManager:
             def list(self, all_projects=False):
@@ -438,6 +523,33 @@ class ProviderTests(unittest.TestCase):
 
 
 class InventoryTests(unittest.TestCase):
+    def test_identity_provider_uses_unscoped_connection(self) -> None:
+        endpoints = [
+            inventory.Endpoint(
+                "identity", "RegionOne", "keystone", "identity", "identity", "public", "identity"
+            ),
+            inventory.Endpoint(
+                "compute", "RegionOne", "nova", "compute", "compute", "public", "compute"
+            ),
+        ]
+        connection = types.SimpleNamespace(current_project_id="admin-project")
+        target_connection = object()
+        project = inventory.Project("project-1", "Project", {})
+        seen_connections = []
+
+        def resolve(endpoint, provider_connection):
+            seen_connections.append((endpoint.service_type, provider_connection))
+            return types.SimpleNamespace(name=endpoint.service_type, collect=lambda *_args, **_kwargs: {})
+
+        with mock.patch.object(inventory, "_as_project_connection", return_value=target_connection), \
+             mock.patch.object(inventory, "resolve_provider", side_effect=resolve):
+            inventory.inventory(endpoints, connection, project)
+
+        self.assertEqual(
+            seen_connections,
+            [("identity", connection), ("compute", target_connection)],
+        )
+
     def test_all_clients_are_preflighted_before_any_resource_is_listed(self) -> None:
         endpoints = [
             inventory.Endpoint("one", "RegionOne", "one", "one", "one", "public", "one"),

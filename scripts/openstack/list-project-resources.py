@@ -14,8 +14,10 @@ being listed.  Use ``--strict`` when an incomplete inventory should be a hard
 failure.
 
 The deployment-specific dashboard, metrics, and compatibility endpoints for
-``panel``, ``LMS``, ``cloudformation``, and Gnocchi are intentionally excluded
-because they are not part of this project-resource inventory.
+``panel``, ``LMS``, ``cloudformation``, Gnocchi, CloudKitty's ``rating``,
+Masakari's ``instance-ha``, Tacker's ``nfv-orchestration``, and Watcher's
+``resource-optimization`` endpoints are intentionally excluded because they
+are not part of this project-resource inventory.
 """
 
 from __future__ import annotations
@@ -99,7 +101,17 @@ def _suppress_error_logs(enabled: bool) -> Any:
 # aliases such as an uppercase ``LMS`` or a Gnocchi ``metric`` type remain
 # excluded if service-type canonicalization changes.
 IGNORED_SERVICE_TYPES = frozenset(
-    {"cloudformation", "gnocchi", "lms", "metric", "panel"}
+    {
+        "cloudformation",
+        "gnocchi",
+        "instance-ha",
+        "lms",
+        "metric",
+        "nfv-orchestration",
+        "panel",
+        "rating",
+        "resource-optimization",
+    }
 )
 
 
@@ -139,9 +151,11 @@ GLOBAL_RESOURCE_NAMES = {
     "info",
     "limit",
     "limits",
+    "migration",
     "policy_type",
     "profile_type",
     "provider",
+    "policy",
     "quota",
     "quota_class_set",
     "quota_set",
@@ -151,13 +165,17 @@ GLOBAL_RESOURCE_NAMES = {
     "resource_provider",
     "role",
     "schema",
+    "server_migration",
     "service",
+    "service_profile",
     "service_status",
     "stats",
     "stats_pools",
     "task",
+    "tenant_usage",
     "type",
     "user",
+    "usage",
     "version",
     "volume_type",
     "volume_type_access",
@@ -277,6 +295,15 @@ def _is_missing_resource_error(error: BaseException) -> bool:
             r"\b404\b|not found|could not be found|resource could not be found",
             text,
         )
+    )
+
+
+def _is_invalid_project_filter_error(error: BaseException) -> bool:
+    """Return whether a service rejects the project filter itself."""
+
+    text = _text(error).casefold()
+    return "invalid filters" in text and bool(
+        re.search(r"\b(?:project|tenant)_id\b", text)
     )
 
 
@@ -822,6 +849,45 @@ def _filter_related_resources(
     return objects
 
 
+def _exclude_default_security_group(
+    objects_by_resource: dict[str, list[Any]],
+    result: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Leave Neutron's automatic default group for project deletion.
+
+    Neutron refuses to delete a project's ``default`` security group while
+    the project still exists.  Project deletion removes it, and the legacy
+    cleanup performs a final security-group sweep after that deletion.
+    """
+
+    groups = objects_by_resource.get("security_group", [])
+    default_ids = {
+        _text(_value(group, "id"))
+        for group in groups
+        if _text(_value(group, "name")).casefold() == "default"
+    }
+    if not default_ids:
+        return
+
+    objects_by_resource["security_group"] = [
+        group for group in groups if _text(_value(group, "id")) not in default_ids
+    ]
+    result["security_group"] = [
+        _resource_to_dict(group) for group in objects_by_resource["security_group"]
+    ]
+    rules = objects_by_resource.get("security_group_rule")
+    if rules is not None:
+        objects_by_resource["security_group_rule"] = [
+            rule
+            for rule in rules
+            if _text(_value(rule, "security_group_id")) not in default_ids
+        ]
+        result["security_group_rule"] = [
+            _resource_to_dict(rule)
+            for rule in objects_by_resource["security_group_rule"]
+        ]
+
+
 def _list_all(proxy: Any, resource_class: type, **kwargs: Any) -> list[Any]:
     list_method = getattr(proxy, "_list", None)
     if not callable(list_method):
@@ -908,12 +974,31 @@ class BuiltinSDKProvider:
                 specs.append(ResourceSpec(name, resource_class, placeholders))
         return sorted(specs, key=lambda spec: (len(spec.placeholders), spec.name))
 
+    def _list_with_project_filter_fallback(
+        self,
+        resource_class: type,
+        kwargs: Mapping[str, Any],
+        project_kwargs: Mapping[str, Any],
+    ) -> list[Any]:
+        try:
+            return _list_all(self.proxy, resource_class, **kwargs)
+        except InventoryError as exc:
+            # Some service APIs reject project_id even when the resource is
+            # project-scoped.  The connection is already scoped to the
+            # project, so retry without that filter and retain the normal
+            # client-side ownership check.
+            if not project_kwargs or not _is_invalid_project_filter_error(exc):
+                raise
+            fallback_kwargs = {
+                key: value for key, value in kwargs.items() if key not in project_kwargs
+            }
+            return _list_all(self.proxy, resource_class, **fallback_kwargs)
+
     def _list_spec(self, spec: ResourceSpec, project_id: str, parents: Mapping[str, list[Any]]) -> list[Any]:
         if not spec.placeholders:
-            objects = _list_all(
-                self.proxy,
-                spec.resource_class,
-                **self._project_kwargs(spec.resource_class, project_id),
+            project_kwargs = self._project_kwargs(spec.resource_class, project_id)
+            objects = self._list_with_project_filter_fallback(
+                spec.resource_class, project_kwargs, project_kwargs
             )
             return [obj for obj in objects if _belongs_to_project(obj, project_id)]
 
@@ -939,12 +1024,17 @@ class BuiltinSDKProvider:
             }
             if any(value is None for value in kwargs.values()):
                 continue
-            kwargs.update(self._project_kwargs(spec.resource_class, project_id))
+            project_kwargs = self._project_kwargs(spec.resource_class, project_id)
+            kwargs.update(project_kwargs)
             key = tuple(sorted((key, _text(value)) for key, value in kwargs.items()))
             if key in seen_kwargs:
                 continue
             seen_kwargs.add(key)
-            objects.extend(_list_all(self.proxy, spec.resource_class, **kwargs))
+            objects.extend(
+                self._list_with_project_filter_fallback(
+                    spec.resource_class, kwargs, project_kwargs
+                )
+            )
         return [obj for obj in objects if _belongs_to_project(obj, project_id)]
 
     def collect(
@@ -971,6 +1061,9 @@ class BuiltinSDKProvider:
                 objects = []
             objects_by_resource[spec.name] = objects
             result[spec.name] = [_resource_to_dict(obj) for obj in objects]
+
+        if self.endpoint.service_type == "network":
+            _exclude_default_security_group(objects_by_resource, result)
 
         for name, objects in list(objects_by_resource.items()):
             filtered = _filter_related_resources(
@@ -1206,8 +1299,13 @@ class LegacySDKProvider:
         managers: list[tuple[str, Any, inspect.Signature]] = []
         self._nested_managers: list[tuple[str, Any, inspect.Signature]] = []
         for name in sorted(dir(self.client)):
+            # A few legacy clients expose transport adapters with list
+            # methods (for example Tacker's *_client attributes).  They are
+            # not project-resource managers and must not be traversed as
+            # nested collections.
             if (
                 name.startswith("_")
+                or name.endswith("_client")
                 or name in GLOBAL_RESOURCE_NAMES
                 or name in GLOBAL_LEGACY_MANAGER_NAMES
                 or _non_deletable_resource(self.endpoint.service_type, name)
@@ -1292,6 +1390,18 @@ class LegacySDKProvider:
         objects_by_manager: dict[str, list[Any]] = {}
         for name, manager, signature in managers:
             kwargs = self._kwargs(signature, project.project_id)
+            if (
+                self.endpoint.service_type == "application-container"
+                and any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+            ):
+                # Zun's legacy container manager accepts project_id through
+                # **kwargs rather than declaring it in its signature.  The
+                # command-line client uses this filter while listing from an
+                # unscoped administrator session.
+                kwargs["project_id"] = project.project_id
             try:
                 values = manager.list(**kwargs)
                 values = [] if values is None else list(values)
@@ -1592,7 +1702,20 @@ def inventory(
     errors: list[dict[str, str]] = []
     for endpoint in endpoints:
         try:
-            providers.append((endpoint, resolve_provider(endpoint, target_connection)))
+            # Some APIs do not allow project-scoped list calls even for an
+            # administrator.  Keep those providers unscoped and apply
+            # ownership with _belongs_to_project after the collection is
+            # returned; all other services are scoped before resource calls.
+            provider_connection = (
+                connection
+                if endpoint.service_type in {
+                    "application-container",
+                    "identity",
+                    "key-manager",
+                }
+                else target_connection
+            )
+            providers.append((endpoint, resolve_provider(endpoint, provider_connection)))
         except InventoryError as exc:
             errors.append(
                 {
