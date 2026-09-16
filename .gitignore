@@ -73,6 +73,11 @@ config
 terraform/.terraform*
 terraform/terraform*.tfstate*
 
+# Terraform working directories and state
+.terraform/
+*.tfstate
+*.tfstate.*
+
 # inventory
 ansible/inventory/**
 !ansible/inventory/aio
