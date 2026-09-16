@@ -135,19 +135,3 @@ create_openstack_linux_image https://download.freebsd.org/releases/VM-IMAGES/15.
   "" \
   "--public --property os_distro=freebsd --property os_type=linux --property os_version=15 --property os_admin_user=root --property hw_qemu_guest_agent=no" \
   "xz_decompress"
-
-
-pass=$(cat ~/hetzner-storagebox.pass)
-if ! mount | grep -q /mnt/winshare; then
-  mkdir -p /mnt/winshare
-  mount.cifs -o user=u429780,pass=$pass //u429780.your-storagebox.de/backup /mnt/winshare/
-fi
-
-file=/mnt/winshare/Win2022_20251209.raw
-image_name=windows-server-2022.20251209.x86_64
-openstack image list -f value | grep $(echo $image_name | sed 's/\..*//g') || openstack image create --public \
-  --property os_distro=windows --property os_type=windows --property os_version=s2022 \
-  --property os_admin_user=Administrator --property hw_qemu_guest_agent=yes \
-  --file $file \
-  --progress \
-  $image_name
