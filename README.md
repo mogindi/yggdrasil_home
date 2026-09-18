@@ -606,12 +606,11 @@ Below is a complete catalog of Make targets in this repo.
   secret only in the ignored Kolla `globals.d` configuration.
 - `openstack-magnum` — initializes Magnum resources.
 - `openstack-manila` — initializes Manila resources.
-- `openstack-trove` — initializes Trove resources and registers MongoDB when its
-  adapted guest image is available. Run `make openstack-trove-mongodb-image` first
-  to create that image; set `TROVE_MONGODB_REBUILD=1` when refreshing the existing
-  image after changing the injected guest adapter. This uploads a replacement
-  image and removes the previous image because Glance cannot replace active image
-  data in place. Set
+- `openstack-trove` — uploads the adapted MongoDB guest image and initializes Trove
+  resources, including the MongoDB datastore. Set `TROVE_MONGODB_REBUILD=1` when
+  refreshing the existing image after changing the injected guest adapter. This
+  uploads a replacement image and removes the previous image because Glance cannot
+  replace active image data in place. Set
   `TROVE_MONGODB_VERSION` to override the default MongoDB version (`8.0`). The
   injected adapter is experimental and supports standalone
   lifecycle/configuration operations plus unauthenticated MongoDB replica-set
@@ -625,6 +624,8 @@ Below is a complete catalog of Make targets in this repo.
   when Trove marks them restart-required. Database/user administration,
   backups, and restore snapshots are not included, and authentication is
   disabled, so use it only in an isolated test environment.
+- `openstack-trove-mongodb-image` — uploads or refreshes only the adapted MongoDB
+  guest image. Use this when rebuilding the image independently of Trove setup.
 - `openstack-trove-mongodb-test` — exercises the supported MongoDB matrix:
   standalone lifecycle and port reachability, configuration attach/detach,
   restart-required configuration changes, replica-set rolling updates and
