@@ -26,7 +26,7 @@ VAULT_ARGS := --vault-password-file "$(VAULT_PASSWORD_FILE)"
 prepare-ansible:
 	rm -rf /etc/ansible/
 	mkdir -p /etc/ansible
-	ln -sfr ../yggdrasil_inventory/$(ENV) /etc/ansible/hosts
+	ln -sfr ansible/inventory/$(ENV) /etc/ansible/hosts
 	ln -sfr ansible/ansible.cfg /etc/ansible/ansible.cfg
 
 harden:
