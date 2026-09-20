@@ -45,6 +45,7 @@
       ansible.builtin.set_fact:
         ceph_cli: "{{ cephadm_shell }} ceph"
         radosgw_admin: "{{ cephadm_shell }} radosgw-admin"
+        openstack_cli: "{{ playbook_dir }}/../../workspace/kolla-venv/bin/openstack"
 
     - name: Validate vaulted Cinder backup RGW secret
       ansible.builtin.assert:
@@ -83,6 +84,34 @@
         {% set node = rgw_client.split('.')[3] %}
         {{ ceph_cli }} config set {{ rgw_client }} rgw_frontends "beast endpoint={{ hostvars[node].network_ceph_public_ip | ansible.utils.ipaddr('address') }}:{{ storage_ceph_rgw_frontend_port | default(6780) }}"
         {% endfor %}
+
+    # Ceilometer's RGW pollster asks the Admin Ops API for every Keystone
+    # project.  RGW returns an empty 200 response for a project without an
+    # account, which the pollster cannot decode as JSON.  Create the normal
+    # Keystone-backed RGW accounts up front so projects with no buckets return
+    # [] and continue to produce a zero-sized sample.  This is idempotent and
+    # does not grant those accounts Admin Ops capabilities.
+    - name: List Keystone projects for RGW account discovery
+      ansible.builtin.shell: >-
+        . /etc/kolla/admin-openrc.sh &&
+        {{ openstack_cli }} project list -f value -c ID
+      register: keystone_project_ids
+      changed_when: false
+
+    - name: List existing RGW users
+      ansible.builtin.command: "{{ radosgw_admin }} user list"
+      register: rgw_user_ids
+      changed_when: false
+      no_log: true
+
+    - name: Create missing Keystone-backed RGW accounts
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user create
+        --uid={{ item }}
+        --display-name='Keystone project {{ item }}'
+      loop: "{{ keystone_project_ids.stdout_lines | map('trim') | select | list }}"
+      when: item not in (rgw_user_ids.stdout | from_json)
+      no_log: true
 
     - name: Check for the Cinder backup RGW user
       ansible.builtin.command: >-
@@ -242,13 +271,16 @@
 
     - name: Ensure Kolla's Ceilometer configuration directory exists
       ansible.builtin.file:
-        path: "{{ kolla_config_dir }}/ceilometer"
+        path: "{{ kolla_config_dir }}/config"
         state: directory
         mode: '0700'
 
     - name: Configure Ceilometer RGW metering credentials
       ansible.builtin.copy:
-        dest: "{{ kolla_config_dir }}/ceilometer/ceilometer.conf"
+        # Kolla merges this global custom file into central, compute, and
+        # notification Ceilometer configs.  A file below config/ceilometer/
+        # is used for polling/meter files and is not read as ceilometer.conf.
+        dest: "{{ kolla_config_dir }}/config/ceilometer.conf"
         mode: '0600'
         content: |
           [service_types]
@@ -260,6 +292,12 @@
 
           [rgw_client]
           implicit_tenants = false
+      no_log: true
+
+    - name: Remove the obsolete Ceilometer RGW credentials location
+      ansible.builtin.file:
+        path: "{{ kolla_config_dir }}/ceilometer/ceilometer.conf"
+        state: absent
       no_log: true
 
 - name: Restart RGW

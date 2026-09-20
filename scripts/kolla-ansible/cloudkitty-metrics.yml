@@ -16,7 +16,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: instance
-      force_granularity: 600
+      force_granularity: 300
 
   image.size:
     unit: GiB
@@ -31,7 +31,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: image
-      force_granularity: 600
+      force_granularity: 300
 
   volume.size:
     unit: GiB
@@ -44,7 +44,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: volume
-      force_granularity: 600
+      force_granularity: 300
 
   # Gnocchi stores the cumulative bytes metrics.  Calculate their rate at
   # collection time and expose the customer-facing hourly service names.
@@ -62,7 +62,7 @@ metrics:
       aggregation_method: rate:mean
       re_aggregation_method: mean
       resource_type: instance_network_interface
-      force_granularity: 600
+      force_granularity: 300
 
   network.incoming.bytes:
     unit: MB
@@ -78,7 +78,7 @@ metrics:
       aggregation_method: rate:mean
       re_aggregation_method: mean
       resource_type: instance_network_interface
-      force_granularity: 600
+      force_granularity: 300
 
   ip.floating:
     unit: ip
@@ -92,7 +92,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: network
-      force_granularity: 600
+      force_granularity: 300
 
   radosgw.objects.size:
     unit: GiB
@@ -104,7 +104,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: ceph_account
-      force_granularity: 600
+      force_granularity: 300
 
   manila.share.size:
     unit: GiB
@@ -120,7 +120,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: manila_share
-      force_granularity: 600
+      force_granularity: 300
 
   # The current Cinder pollster publishes volume.backup.size. Keep the
   # resource metric in the CloudKitty definition so newly collected backups
@@ -134,7 +134,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: volume
-      force_granularity: 600
+      force_granularity: 300
 
   # Older Ceilometer/Cinder deployments published backup capacity as
   # backup.size. Keep the legacy source mapped to the same customer service
@@ -149,7 +149,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: volume
-      force_granularity: 600
+      force_granularity: 300
 
   volume.snapshot.size:
     unit: GiB
@@ -162,7 +162,7 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: yggdrasil_volume_snapshot
-      force_granularity: 600
+      force_granularity: 300
 
   octavia.loadbalancer:
     unit: loadbalancer
@@ -175,4 +175,4 @@ metrics:
     extra_args:
       aggregation_method: mean
       resource_type: yggdrasil_loadbalancer
-      force_granularity: 600
+      force_granularity: 300
