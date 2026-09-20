@@ -19,8 +19,8 @@ metrics:
       force_granularity: 600
 
   image.size:
-    unit: MiB
-    factor: 1/1048576
+    unit: GiB
+    factor: 1/1073741824
     groupby:
       - id
       - user_id
