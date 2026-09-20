@@ -462,8 +462,36 @@ ram_allocation_ratio = $OPENSTACK_ZUN_RAM_ALLOCATION_RATIO
 EOF
 fi
 
-# Keep function collection and CloudKitty publication disabled unless the
-# single function rating switch is enabled.
+# Poll the meters that back the base CloudKitty resources. Function meters
+# remain opt-in and are added below only when function rating is enabled.
+mkdir -p etc/kolla/config/ceilometer
+cat > etc/kolla/config/ceilometer/polling.yaml <<'EOF'
+---
+sources:
+    - name: yggdrasil_base_resources
+      interval: 300
+      meters:
+        - power.state
+        - vcpus
+        - cpu
+        - memory.available
+        - memory.usage
+        - network.incoming.bytes
+        - network.incoming.packets
+        - network.outgoing.bytes
+        - network.outgoing.packets
+        - disk.device.read.bytes
+        - disk.device.read.requests
+        - disk.device.write.bytes
+        - disk.device.write.requests
+        - image.size
+        - volume.size
+        - volume.snapshot.size
+        - volume.backup.size
+        - ip.floating
+        - radosgw.objects.size
+EOF
+
 mkdir -p etc/kolla/config/cloudkitty
 METRICS_SOURCE="${CLOUDKITTY_METRICS_FILE:-$SCRIPT_DIR/cloudkitty-metrics.yml}"
 if [[ ! -f "$METRICS_SOURCE" ]]; then

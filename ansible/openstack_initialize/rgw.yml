@@ -13,6 +13,10 @@
     cinder_backup_s3_endpoint_url: >-
       {{ openstack_cinder_backup_s3_endpoint_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':' ~ (openstack_ceph_rgw_vip_port | default(6780))) }}
     cinder_backup_s3_configured_secret_key: "{{ openstack_cinder_backup_s3_secret_key }}"
+    # Ceilometer reads account bucket statistics through the RGW Admin API.
+    # Keep a separate read-only key rather than reusing the Cinder backup key.
+    ceilometer_rgw_user: "{{ openstack_ceilometer_rgw_user | default('ceilometer-rgw') }}"
+    ceilometer_rgw_caps: "{{ openstack_ceilometer_rgw_caps | default('buckets=read') }}"
     kolla_config_dir: "{{ playbook_dir }}/../../workspace/etc/kolla"
   tasks:
     - name: Read the configured Ceph client version from the pinned image
@@ -41,6 +45,7 @@
       ansible.builtin.set_fact:
         ceph_cli: "{{ cephadm_shell }} ceph"
         radosgw_admin: "{{ cephadm_shell }} radosgw-admin"
+        openstack_cli: "{{ playbook_dir }}/../../workspace/kolla-venv/bin/openstack"
 
     - name: Validate vaulted Cinder backup RGW secret
       ansible.builtin.assert:
@@ -79,6 +84,34 @@
         {% set node = rgw_client.split('.')[3] %}
         {{ ceph_cli }} config set {{ rgw_client }} rgw_frontends "beast endpoint={{ hostvars[node].network_ceph_public_ip | ansible.utils.ipaddr('address') }}:{{ storage_ceph_rgw_frontend_port | default(6780) }}"
         {% endfor %}
+
+    # Ceilometer's RGW pollster asks the Admin Ops API for every Keystone
+    # project.  RGW returns an empty 200 response for a project without an
+    # account, which the pollster cannot decode as JSON.  Create the normal
+    # Keystone-backed RGW accounts up front so projects with no buckets return
+    # [] and continue to produce a zero-sized sample.  This is idempotent and
+    # does not grant those accounts Admin Ops capabilities.
+    - name: List Keystone projects for RGW account discovery
+      ansible.builtin.shell: >-
+        . /etc/kolla/admin-openrc.sh &&
+        {{ openstack_cli }} project list -f value -c ID
+      register: keystone_project_ids
+      changed_when: false
+
+    - name: List existing RGW users
+      ansible.builtin.command: "{{ radosgw_admin }} user list"
+      register: rgw_user_ids
+      changed_when: false
+      no_log: true
+
+    - name: Create missing Keystone-backed RGW accounts
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user create
+        --uid={{ item }}
+        --display-name='Keystone project {{ item }}'
+      loop: "{{ keystone_project_ids.stdout_lines | map('trim') | select | list }}"
+      when: item not in (rgw_user_ids.stdout | from_json)
+      no_log: true
 
     - name: Check for the Cinder backup RGW user
       ansible.builtin.command: >-
@@ -171,6 +204,102 @@
           cinder_backup_s3_secret_key: {{ cinder_backup_s3_configured_secret_key | to_json }}
       no_log: true
 
+    - name: Check for the Ceilometer RGW metering user
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user info --uid={{ ceilometer_rgw_user }}
+      register: ceilometer_rgw_user_info
+      changed_when: false
+      failed_when: ceilometer_rgw_user_info.rc not in [0, 22]
+      no_log: true
+
+    - name: Create the Ceilometer RGW metering user
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user create
+        --uid={{ ceilometer_rgw_user }}
+        --display-name='Ceilometer RGW metering'
+        --gen-access-key
+        --gen-secret
+      when: ceilometer_rgw_user_info.rc == 22
+      no_log: true
+
+    - name: Read the Ceilometer RGW metering user
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user info --uid={{ ceilometer_rgw_user }}
+      register: ceilometer_rgw_user_info_after_create
+      changed_when: false
+      no_log: true
+
+    - name: Create an S3 key for the Ceilometer RGW metering user when needed
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} key create
+        --uid={{ ceilometer_rgw_user }}
+        --key-type=s3
+        --gen-access-key
+        --gen-secret
+      when: >-
+        ((ceilometer_rgw_user_info_after_create.stdout | from_json).get('keys', []) | length) == 0
+      no_log: true
+
+    - name: Grant the Ceilometer RGW metering user read-only Admin API access
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} caps add
+        --uid={{ ceilometer_rgw_user }}
+        --caps={{ ceilometer_rgw_caps | quote }}
+      changed_when: false
+      no_log: true
+
+    - name: Read the final Ceilometer RGW metering user
+      ansible.builtin.command: >-
+        {{ radosgw_admin }} user info --uid={{ ceilometer_rgw_user }}
+      register: ceilometer_rgw_user_info_final
+      changed_when: false
+      no_log: true
+
+    - name: Select the Ceilometer RGW metering S3 key
+      ansible.builtin.set_fact:
+        ceilometer_rgw_key: >-
+          {{ ((ceilometer_rgw_user_info_final.stdout | from_json).get('keys', []) | first) | default({}, true) }}
+      no_log: true
+
+    - name: Verify the Ceilometer RGW metering credentials
+      ansible.builtin.assert:
+        that:
+          - ceilometer_rgw_key.get('access_key', '') | length > 0
+          - ceilometer_rgw_key.get('secret_key', '') | length > 0
+        fail_msg: The Ceilometer RGW metering user does not have an S3 key.
+      no_log: true
+
+    - name: Ensure Kolla's Ceilometer configuration directory exists
+      ansible.builtin.file:
+        path: "{{ kolla_config_dir }}/config"
+        state: directory
+        mode: '0700'
+
+    - name: Configure Ceilometer RGW metering credentials
+      ansible.builtin.copy:
+        # Kolla merges this global custom file into central, compute, and
+        # notification Ceilometer configs.  A file below config/ceilometer/
+        # is used for polling/meter files and is not read as ceilometer.conf.
+        dest: "{{ kolla_config_dir }}/config/ceilometer.conf"
+        mode: '0600'
+        content: |
+          [service_types]
+          radosgw = object-store
+
+          [rgw_admin_credentials]
+          access_key = {{ ceilometer_rgw_key.access_key }}
+          secret_key = {{ ceilometer_rgw_key.secret_key }}
+
+          [rgw_client]
+          implicit_tenants = false
+      no_log: true
+
+    - name: Remove the obsolete Ceilometer RGW credentials location
+      ansible.builtin.file:
+        path: "{{ kolla_config_dir }}/ceilometer/ceilometer.conf"
+        state: absent
+      no_log: true
+
 - name: Restart RGW
   hosts: deployment_nodes
   any_errors_fatal: true
@@ -193,6 +322,16 @@
           - reconfigure
           - -t
           - cinder
+        chdir: "{{ playbook_dir }}/../.."
+      no_log: true
+
+    - name: Reconfigure Ceilometer with RGW metering credentials
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../../scripts/kolla-ansible/kolla-ansible.sh"
+          - reconfigure
+          - -t
+          - ceilometer
         chdir: "{{ playbook_dir }}/../.."
       no_log: true
 
