@@ -1,5 +1,7 @@
 metrics:
-  cpu:
+  # Ceilometer's instance uptime gauge is vcpus.  Keep the CloudKitty
+  # service name as instance because the hashmap is keyed by flavor_id.
+  vcpus:
     unit: instance
     alt_name: instance
     groupby:
@@ -44,8 +46,11 @@ metrics:
       resource_type: volume
       force_granularity: 600
 
-  network.outgoing.bytes.rate:
+  # Gnocchi stores the cumulative bytes metrics.  Calculate their rate at
+  # collection time and expose the customer-facing hourly service names.
+  network.outgoing.bytes:
     unit: MB
+    alt_name: network.outgoing.bytes.rate
     groupby:
       - id
       - project_id
@@ -54,12 +59,14 @@ metrics:
     metadata:
       - instance_id
     extra_args:
-      aggregation_method: mean
+      aggregation_method: rate:mean
+      re_aggregation_method: mean
       resource_type: instance_network_interface
       force_granularity: 600
 
-  network.incoming.bytes.rate:
+  network.incoming.bytes:
     unit: MB
+    alt_name: network.incoming.bytes.rate
     groupby:
       - id
       - project_id
@@ -68,7 +75,8 @@ metrics:
     metadata:
       - instance_id
     extra_args:
-      aggregation_method: mean
+      aggregation_method: rate:mean
+      re_aggregation_method: mean
       resource_type: instance_network_interface
       force_granularity: 600
 
@@ -114,8 +122,26 @@ metrics:
       resource_type: manila_share
       force_granularity: 600
 
+  # The current Cinder pollster publishes volume.backup.size. Keep the
+  # resource metric in the CloudKitty definition so newly collected backups
+  # are rated.
   volume.backup.size:
     unit: GiB
+    groupby:
+      - id
+      - user_id
+      - project_id
+    extra_args:
+      aggregation_method: mean
+      resource_type: volume
+      force_granularity: 600
+
+  # Older Ceilometer/Cinder deployments published backup capacity as
+  # backup.size. Keep the legacy source mapped to the same customer service
+  # name so existing measures remain billable during migration.
+  backup.size:
+    unit: GiB
+    alt_name: volume.backup.size
     groupby:
       - id
       - user_id
