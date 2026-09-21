@@ -87,6 +87,16 @@ storage_ceph_rgw_frontend_port: 6780
 openstack_ceph_rgw_vip_port: 6780
 
 openstack_release: 2025.2
+# Kolla merges this host-specific YAML into the OpenSearch configuration.
+# Keep the disk watermarks below the full-disk condition while retaining
+# OpenSearch's default read-only protection at the flood stage.
+kolla_custom_configs:
+  opensearch:
+    aio:
+      opensearch.yml: |
+        cluster.routing.allocation.disk.watermark.high: "94%"
+        cluster.routing.allocation.disk.watermark.flood_stage: "96%"
+
 openstack_network_guard_enabled: false
 openstack_zun_kata_enabled: true
 # Docker/Kuryr containers do not consume Neutron DHCP DNS options directly.
