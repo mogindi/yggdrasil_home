@@ -211,52 +211,6 @@
           {% endfor %}
           # END ANSIBLE GENERATED HOSTS
 
-    - name: Identify VLAN bridge members that should not gate network-online
-      ansible.builtin.set_fact:
-        network_netplan_bridge_vlan_members: >-
-          {{
-            (
-              network_netplan_overrides_file.network.bridges | default({})
-              | dict2items
-              | map(attribute='value.interfaces')
-              | list
-              | flatten
-            )
-            | intersect(
-                network_netplan_overrides_file.network.vlans | default({})
-                | dict2items
-                | map(attribute='key')
-                | list
-              )
-          }}
-      when:
-        - network_netplan_overrides_file is defined
-        - network_netplan_overrides_file.network is defined
-        - network_netplan_overrides_file.network.bridges is defined
-        - network_netplan_overrides_file.network.vlans is defined
-      tags: netplan
-
-    - name: Mark VLAN bridge members optional for networkd online checks
-      ansible.builtin.set_fact:
-        network_netplan_overrides_file: >-
-          {{
-            network_netplan_overrides_file
-            | combine(
-                {
-                  'network': {
-                    'vlans': {
-                      item: network_netplan_overrides_file.network.vlans[item]
-                      | combine({'optional': true})
-                    }
-                  }
-                },
-                recursive=True
-              )
-          }}
-      loop: "{{ network_netplan_bridge_vlan_members | default([]) }}"
-      when: network_netplan_bridge_vlan_members | default([]) | length > 0
-      tags: netplan
-
     - name: Add netplan overrides file
       copy:
         dest: /etc/netplan/55-overrides.yaml

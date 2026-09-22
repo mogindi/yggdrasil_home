@@ -10,12 +10,15 @@ route_table_script="$repo_root/scripts/devices/create-route-table.sh"
 grep -Fq 'Requires=network_veth_device.service' "$devices_playbook"
 grep -Fq 'After=systemd-networkd.service network-online.target network_veth_device.service' "$devices_playbook"
 grep -Fq 'PartOf=systemd-networkd.service network_veth_device.service' "$devices_playbook"
-grep -Fq 'network_netplan_bridge_vlan_members' "$devices_playbook"
-grep -Fq "'optional': true" "$devices_playbook"
 grep -Fq 'Requires=sys-subsystem-net-devices-br0.device' "$devices_playbook"
 grep -Fq 'Requires=sys-subsystem-net-devices-openstack_mgmt.device' "$devices_playbook"
 grep -Fq 'Restart=on-failure' "$devices_playbook"
 grep -Fq 'RestartSec=5s' "$devices_playbook"
+
+if grep -Fq 'network_netplan_bridge_vlan_members' "$devices_playbook"; then
+    echo "devices.yml must not transform inventory netplan settings" >&2
+    exit 1
+fi
 
 grep -Fqx 'BindsTo=sys-subsystem-net-devices-br0.device' "$veth_script"
 grep -Fqx 'After=systemd-networkd.service network-online.target sys-subsystem-net-devices-br0.device' "$veth_script"
