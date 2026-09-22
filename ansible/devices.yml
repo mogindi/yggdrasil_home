@@ -279,8 +279,14 @@
         [Unit]
         Description=Network routes for table main
         Wants=network-online.target
+        {% if network_create_veth_pair | default(false) | bool %}
+        Requires=network_veth_device.service
+        After=systemd-networkd.service network-online.target network_veth_device.service
+        PartOf=systemd-networkd.service network_veth_device.service
+        {% else %}
         After=systemd-networkd.service network-online.target
         PartOf=systemd-networkd.service
+        {% endif %}
 
         [Service]
         {% for route in network_extra_routes_main_table.routes %}
@@ -288,6 +294,8 @@
         {% endfor %}
         Type=oneshot
         RemainAfterExit=yes
+        Restart=on-failure
+        RestartSec=5s
 
         [Install]
         WantedBy=multi-user.target
@@ -313,8 +321,14 @@
         [Unit]
         Description=Network route table $table for $network_cidr
         Wants=network-online.target
+        {% if network_create_veth_pair | default(false) | bool %}
+        Requires=network_veth_device.service
+        After=systemd-networkd.service network-online.target network_veth_device.service
+        PartOf=systemd-networkd.service network_veth_device.service
+        {% else %}
         After=systemd-networkd.service network-online.target
         PartOf=systemd-networkd.service
+        {% endif %}
 
         [Service]
         ExecStart=/bin/bash -c "grep -q \"$table_id $table\" /etc/iproute2/rt_tables || ( echo \"$table_id $table\" | tee -a /etc/iproute2/rt_tables )"
@@ -325,6 +339,8 @@
         {% endfor %}
         Type=oneshot
         RemainAfterExit=yes
+        Restart=on-failure
+        RestartSec=5s
 
         [Install]
         WantedBy=multi-user.target
