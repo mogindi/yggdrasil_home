@@ -1,7 +1,15 @@
 [Unit]
 Description=Yggdrasil node security hardening ({{ item.script }})
+{% if item.early | default(false) %}
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+After=local-fs.target
+Conflicts=shutdown.target
+DefaultDependencies=no
+{% else %}
 Wants=network-online.target
 After=network-online.target {{ item.after }}
+{% endif %}
 
 [Service]
 Type=oneshot
@@ -19,4 +27,8 @@ Environment="ADDITIONAL_IPTABLE_RULES_FILE=/etc/yggdrasil/additional-iptables.ru
 RemainAfterExit=yes
 
 [Install]
+{% if item.early | default(false) %}
+WantedBy=sysinit.target
+{% else %}
 WantedBy=multi-user.target
+{% endif %}
