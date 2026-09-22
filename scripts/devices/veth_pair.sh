@@ -21,8 +21,8 @@ cat > /etc/systemd/system/network_veth_device.service <<EOF
 [Unit]
 Description=create veth device for openstack external gateway
 Wants=network-online.target
-Requires=dev-br0.device
-After=systemd-networkd.service network-online.target dev-br0.device
+Requires=sys-subsystem-net-devices-br0.device
+After=systemd-networkd.service network-online.target sys-subsystem-net-devices-br0.device
 PartOf=systemd-networkd.service
 
 [Service]

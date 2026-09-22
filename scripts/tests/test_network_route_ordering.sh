@@ -13,8 +13,8 @@ grep -Fq 'PartOf=systemd-networkd.service network_veth_device.service' "$devices
 grep -Fq 'Restart=on-failure' "$devices_playbook"
 grep -Fq 'RestartSec=5s' "$devices_playbook"
 
-grep -Fqx 'Requires=dev-br0.device' "$veth_script"
-grep -Fqx 'After=systemd-networkd.service network-online.target dev-br0.device' "$veth_script"
+grep -Fqx 'Requires=sys-subsystem-net-devices-br0.device' "$veth_script"
+grep -Fqx 'After=systemd-networkd.service network-online.target sys-subsystem-net-devices-br0.device' "$veth_script"
 
 grep -Fq 'Requires=network_veth_device.service' "$route_table_script"
 grep -Fq 'After=systemd-networkd.service network-online.target network_veth_device.service' "$route_table_script"
