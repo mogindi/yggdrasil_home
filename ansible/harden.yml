@@ -10,6 +10,11 @@
     clamav_package_path: >-
       /var/cache/clamav-{{ clamav_version }}.linux.x86_64.deb
     security_services:
+      # The baseline host firewall does not require network-online; load it
+      # before network setup. Route/NAT services remain network-dependent.
+      - name: security_iptables.service
+        script: iptables.sh
+        early: true
       - name: security_auditd.service
         script: auditd.sh
         after: apt-daily.service apt-daily-upgrade.service
@@ -22,9 +27,6 @@
       - name: security_fail2ban.service
         script: fail2ban.sh
         after: security_disable_password_ssh.service
-      - name: security_iptables.service
-        script: iptables.sh
-        after: security_fail2ban.service
       - name: security_oscap.service
         script: oscap.sh
         after: security_iptables.service
@@ -154,6 +156,12 @@
     - name: Reload systemd after installing security units
       ansible.builtin.systemd:
         daemon_reload: true
+
+    - name: Remove legacy late iptables enablement
+      ansible.builtin.file:
+        path: /etc/systemd/system/multi-user.target.wants/security_iptables.service
+        state: absent
+      when: not ansible_check_mode
 
     - name: Enable security services
       ansible.builtin.systemd:
