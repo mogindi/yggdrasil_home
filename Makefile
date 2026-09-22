@@ -17,6 +17,7 @@ ifeq ($(wildcard $(VAULT_PASSWORD_FILE)),)
 $(error Ansible vault password file not found: $(VAULT_PASSWORD_FILE))
 endif
 VAULT_ARGS := --vault-password-file "$(VAULT_PASSWORD_FILE)"
+SECRET_FILE ?= home-secrets.yaml
 
 #########
 # Setup #
@@ -221,7 +222,11 @@ secret-encrypt:
 
 secret-decrypt:
 	export ANSIBLE_VAULT_PASSWORD_FILE=~/.ansible_vault && \
-	yq .$(SECRET_KEY) /etc/ansible/hosts/group_vars/all/secrets.yaml | ansible-vault decrypt 2>/dev/null; echo
+	secret_file="/etc/ansible/hosts/group_vars/all/$(SECRET_FILE)"; \
+	if [ ! -f "$$secret_file" ] && [ -f /etc/ansible/hosts/group_vars/all/secrets.yaml ]; then \
+		secret_file=/etc/ansible/hosts/group_vars/all/secrets.yaml; \
+	fi; \
+	yq .$(SECRET_KEY) "$$secret_file" | ansible-vault decrypt 2>/dev/null; echo
 
 
 
