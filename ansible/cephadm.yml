@@ -65,6 +65,8 @@
     - name: Set the exact Ceph container image
       set_fact:
         ceph_image: "{{ ceph_image_registry }}:{{ ceph_image_track }}"
+      tags:
+        - ceph-pools
 
     - name: Verify the exact Ceph client image on all managed hosts
       command: >-
@@ -353,19 +355,12 @@
       command: "{{ ceph_cli }} mgr module enable prometheus"
 
     - name: Add pools
-      script: "{{ playbook_dir }}/../scripts/cephadm/pools.sh"
-      args:
-        # Version the marker because the original pool script did not create
-        # the Gnocchi pool. This makes the migration idempotently run once on
-        # existing clusters as well as on fresh deployments.
-        creates: /root/cephadm_pools_v2.done
+      ansible.builtin.shell:
+        cmd: cephadm --image {{ ceph_image }} shell -- bash -s
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/../scripts/cephadm/pools.sh') }}"
       run_once: true
-      environment:
-        CEPHADM_IMAGE: "{{ ceph_image }}"
-        CEPHADM_POOLS_MARKER: /root/cephadm_pools_v2.done
-        CEPH_GNOCCHI_POOL_NAME: "{{ ceph_gnocchi_pool_name | default('gnocchi') }}"
-        CEPH_GNOCCHI_POOL_SIZE: "{{ ceph_gnocchi_pool_size | default(storage_ceph_default_pool_size) }}"
-        CEPH_GNOCCHI_POOL_MIN_SIZE: "{{ ceph_gnocchi_pool_min_size | default(storage_ceph_default_min_pool_size) }}"
+      tags:
+        - ceph-pools
 
     - name: Ensure Gnocchi Ceph client has pool-scoped permissions
       command: >-
