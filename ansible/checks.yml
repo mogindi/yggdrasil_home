@@ -12,9 +12,22 @@
       command: ping -c 1 -W 2 {{ hostvars[item[0]][item[1]] | ansible.utils.ipaddr('address') }}
       loop: "{{ groups['deployment_nodes'] | product(['network_openstack_mgmt_ip', 'network_ceph_public_ip', 'network_ceph_cluster_ip']) | list }}"
 
-    - name: Check nodes could all ping the gateway of provider network
-      command: ping -c 1 -W 2 {{ hostvars[item].network_provider_gateway_ip | ansible.utils.ipaddr('address') }}
-      loop: "{{ groups['deployment_nodes'] }}"
+    - name: Detect provider gateway VIP owner
+      shell: ip -4 addr show dev br0 | grep -Fq "{{ network_provider_gateway_keepalived_vip | ansible.utils.ipaddr('address') }}/32"
+      register: provider_vip_present
+      changed_when: false
+      failed_when: false
+      when: network_provider_gateway_keepalived_vip is defined
+
+    - name: Check internet through provider gateway VIP
+      command: ping -c 1 -W 2 -I "{{ network_provider_gateway_keepalived_vip | ansible.utils.ipaddr('address') }}" 8.8.8.8
+      when:
+        - network_provider_gateway_keepalived_vip is defined
+        - provider_vip_present.rc == 0
+
+    - name: Check internet through provider network
+      command: ping -c 1 -W 2 -I "{{ network_provider_gateway_keepalived_interface | default('br0') }}" 8.8.8.8
+      when: network_provider_gateway_keepalived_vip is not defined
 
 
 - name: Check networking on deployment controller
