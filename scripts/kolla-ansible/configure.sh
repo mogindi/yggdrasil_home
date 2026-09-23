@@ -4,17 +4,6 @@
 
 CONFIG_DIR=etc/kolla
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-: "${OPENSTACK_NOVA_COMPUTE_MONITORS:=cpu.virt_driver}"
-: "${OPENSTACK_NOVA_METRICS_WEIGHT_SETTING:=cpu.percent=-1.0}"
-: "${OPENSTACK_ZUN_KATA_ENABLED:=no}"
-: "${OPENSTACK_ZUN_CPU_ALLOCATION_RATIO:=8.0}"
-: "${OPENSTACK_ZUN_RAM_ALLOCATION_RATIO:=1.5}"
-: "${OPENSTACK_ZUN_HOST_SHARED_WITH_NOVA:=true}"
-: "${OPENSTACK_FUNCTION_CLOUDKITTY_ENABLED:=no}"
-: "${OPENSTACK_NETWORK_GUARD_ENABLED:=no}"
-: "${OPENSTACK_CEPH_RGW_VIP_PORT:=6780}"
-: "${OPENSTACK_CEPH_GNOCCHI_USER:=gnocchi}"
-: "${OPENSTACK_CEPH_GNOCCHI_POOL_NAME:=gnocchi}"
 
 is_enabled() {
 	case "${1,,}" in
@@ -120,7 +109,7 @@ set_global_config enable_gnocchi yes
 set_global_config gnocchi_backend_storage ceph
 set_global_config ceph_gnocchi_user "$OPENSTACK_CEPH_GNOCCHI_USER"
 set_global_config ceph_gnocchi_pool_name "$OPENSTACK_CEPH_GNOCCHI_POOL_NAME"
-case "${OPENSTACK_RELEASE:-}" in
+case "$OPENSTACK_RELEASE" in
 	2025.2|2026.*)
 		set_global_config gnocchi_incoming_storage valkey
 		;;
@@ -160,7 +149,7 @@ set_global_config prometheus_openstack_exporter_cmdline_extras '"--disable-metri
 #set_global_config enable_redis yes
 set_global_config enable_valkey yes
 set_global_config enable_sahara yes
-if [[ "${OPENSTACK_RELEASE:-}" == '2025.2' ]]; then
+if [[ "$OPENSTACK_RELEASE" == '2025.2' ]]; then
 	set_global_config enable_senlin yes
 else
 	set_global_config enable_senlin no
@@ -210,25 +199,11 @@ set_global_config openstack_service_rpc_workers "$OPENSTACK_WORKER_COUNT"
 
 set_global_config disable_firewall no
 
-for service in glance nova cinder/cinder-volume cinder/cinder-backup; do
+for service in glance nova cinder/cinder-volume cinder/cinder-backup gnocchi; do
 	mkdir -p etc/kolla/config/$service/
 	cp /etc/ceph/ceph.client.admin.keyring etc/kolla/config/$service/
 	cat /etc/ceph/ceph.conf | sed 's/^\t//g' > etc/kolla/config/$service/ceph.conf
 done
-
-# Kolla's native Ceph Gnocchi backend reads the cluster directly through
-# librados. It does not use the Ceph RGW/S3 endpoint, so both the cluster
-# configuration and the dedicated client keyring must be available to every
-# Gnocchi container.
-gnocchi_config_dir="$CONFIG_DIR/config/gnocchi"
-gnocchi_keyring="/etc/ceph/ceph.client.${OPENSTACK_CEPH_GNOCCHI_USER}.keyring"
-if [[ ! -f /etc/ceph/ceph.conf || ! -f "$gnocchi_keyring" ]]; then
-	echo "Gnocchi Ceph backend requires /etc/ceph/ceph.conf and $gnocchi_keyring" >&2
-	exit 1
-fi
-mkdir -p "$gnocchi_config_dir"
-cat /etc/ceph/ceph.conf | sed 's/^\t//g' > "$gnocchi_config_dir/ceph.conf"
-cp "$gnocchi_keyring" "$gnocchi_config_dir/ceph.client.${OPENSTACK_CEPH_GNOCCHI_USER}.keyring"
 
 # magnum
 cat > etc/kolla/config/magnum.conf <<EOF
@@ -375,14 +350,14 @@ EOF
 
 # Keep project-scoped reader users from mutating Nova keypairs. Kolla copies
 # this policy file into the Nova API and metadata service containers.
-NOVA_POLICY_SOURCE="${OPENSTACK_NOVA_POLICY_FILE:-$SCRIPT_DIR/policies/nova/policy.yaml}"
+NOVA_POLICY_SOURCE="$OPENSTACK_NOVA_POLICY_FILE"
 cp "$NOVA_POLICY_SOURCE" "$config_dir/policy.yaml"
 
 # Keep project-scoped reader users from creating Cinder volumes. OpenStack
 # policies are enforced per service, so Cinder needs its own override.
 config_dir=etc/kolla/config/cinder
 mkdir -p "$config_dir"
-CINDER_POLICY_SOURCE="${OPENSTACK_CINDER_POLICY_FILE:-$SCRIPT_DIR/policies/cinder/policy.yaml}"
+CINDER_POLICY_SOURCE="$OPENSTACK_CINDER_POLICY_FILE"
 cp "$CINDER_POLICY_SOURCE" "$config_dir/policy.yaml"
 
 # Data control-plane APIs use the same project-scoped Data role tiers.
@@ -493,7 +468,7 @@ sources:
 EOF
 
 mkdir -p etc/kolla/config/cloudkitty
-METRICS_SOURCE="${CLOUDKITTY_METRICS_FILE:-$SCRIPT_DIR/cloudkitty-metrics.yml}"
+METRICS_SOURCE="$CLOUDKITTY_METRICS_FILE"
 if [[ ! -f "$METRICS_SOURCE" ]]; then
 	echo "CloudKitty metrics definition not found: $METRICS_SOURCE" >&2
 	exit 1
