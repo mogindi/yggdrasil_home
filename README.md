@@ -575,7 +575,9 @@ Below is a complete catalog of Make targets in this repo.
   node-local work is serialized and OpenSearch cleanup runs once per cluster.
 - `openstack-roles` — ensures the project-scoped and service integration
   roles used by Yggdrasil exist in Keystone. Override `OPENSTACK_ROLES`
-  to customize the space-separated role list.
+  to customize the space-separated role list. This includes the deny-only
+  `locked` role used while an expired trial is awaiting upgrade; it is
+  intentionally not referenced by any service policy.
 - `openstack-project-resources` — lists all resources visible to `PROJECT`,
   using the Python SDKs discovered from the endpoint catalog. Pass
   `ARGS="--format json"` for machine-readable output; resource failures are
