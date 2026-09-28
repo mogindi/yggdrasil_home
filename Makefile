@@ -10,7 +10,7 @@ OPENSTACK_ROLES ?= reader data_reader data_editor data_admin migration \
 	project_admin creator observer audit rating heat_stack_owner heat_stack_user \
 	load-balancer_observer load-balancer_global_observer \
 	load-balancer_member load-balancer_admin load-balancer_quota_admin \
-	key-manager:service-admin ResellerAdmin
+	key-manager:service-admin ResellerAdmin locked
 # Ansible vault password file is shared across environments.
 override VAULT_PASSWORD_FILE := $(HOME)/.ansible_vault
 ifeq ($(wildcard $(VAULT_PASSWORD_FILE)),)
