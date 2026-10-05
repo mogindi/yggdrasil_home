@@ -135,21 +135,21 @@
             custom_cmds: |
               sed -i '123i\ \ \ \ \ \ \ \ expected_protos.append(\"https\")' /var/lib/kolla/venv/lib/python3.10/site-packages/nova/console/websocketproxy.py
           - image: quay.io/openstack.kolla/ceilometer-central:{{ image_version }}
-            customize_marker: customize-ceilometer-gnocchi-resource-v1.done
+            customize_marker: customize-ceilometer-gnocchi-resource-v2.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-ceilometer-gnocchi-resource.py
           - image: quay.io/openstack.kolla/ceilometer-compute:{{ image_version }}
-            customize_marker: customize-ceilometer-gnocchi-resource-v1.done
+            customize_marker: customize-ceilometer-gnocchi-resource-v2.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-ceilometer-gnocchi-resource.py
           - image: quay.io/openstack.kolla/ceilometer-notification:{{ image_version }}
-            customize_marker: customize-ceilometer-gnocchi-resource-v1.done
+            customize_marker: customize-ceilometer-gnocchi-resource-v2.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
@@ -260,21 +260,21 @@
               chmod 644 /dev/shm/$(hostname)_nova-novncproxy_qmanager
               EOF
           - image: quay.io/openstack.kolla/ceilometer-central:{{ image_version }}
-            customize_marker: customize-ceilometer-gnocchi-resource-v1.done
+            customize_marker: customize-ceilometer-gnocchi-resource-v2.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-ceilometer-gnocchi-resource.py
           - image: quay.io/openstack.kolla/ceilometer-compute:{{ image_version }}
-            customize_marker: customize-ceilometer-gnocchi-resource-v1.done
+            customize_marker: customize-ceilometer-gnocchi-resource-v2.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-ceilometer-gnocchi-resource.py
           - image: quay.io/openstack.kolla/ceilometer-notification:{{ image_version }}
-            customize_marker: customize-ceilometer-gnocchi-resource-v1.done
+            customize_marker: customize-ceilometer-gnocchi-resource-v2.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
