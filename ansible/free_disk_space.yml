@@ -8,8 +8,8 @@
 #
 #   -e free_disk_space_apply=true -e free_disk_space_confirm=true
 #
-# See README.md for the opt-ins that enable log, volume, MariaDB, OpenSearch,
-# and Fluentd deletion.
+# See README.md for the remaining opt-ins for volume, MariaDB, and Fluentd
+# deletion.
 
 - name: Load shared Kolla credentials for optional MariaDB cleanup
   hosts: deployment_controller
@@ -79,7 +79,10 @@
           - "apply={{ free_disk_space_apply | bool }}"
           - "host_log_cleanup={{ free_disk_space_host_log_cleanup | bool }}"
           - "truncate_host_logs={{ free_disk_space_truncate_host_logs | bool }}"
+          - "docker_rotated_log_cleanup={{ free_disk_space_docker_rotated_log_cleanup | bool }}"
+          - "docker_active_log_cleanup={{ free_disk_space_docker_active_log_cleanup | bool }}"
           - "docker_volume_prune={{ free_disk_space_docker_volume_prune | bool }}"
+          - "opensearch_cleanup={{ free_disk_space_opensearch_cleanup | bool }}"
           - "mariadb_binlog_cleanup={{ free_disk_space_mariadb_binlog_cleanup | bool }}"
           - "fluentd_retry_discard={{ free_disk_space_discard_fluentd_retry | bool }}"
 

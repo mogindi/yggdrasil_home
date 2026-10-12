@@ -470,30 +470,30 @@ compatibility helper and does not read Ansible inventory.
 make free-disk-space ENV=my-private-cloud
 ```
 
-To apply the baseline node cleanup (journal, Kolla log rotation, dangling
-images, builder cache, and package caches), explicitly enable mutations:
+To apply the baseline cleanup (journal vacuuming, Kolla log rotation, host-log
+cleanup, current and rotated Docker JSON-log cleanup, active Docker JSON-log
+truncation, dated `flog-*` retention, dangling images, builder cache, and
+package caches), explicitly enable mutations:
 
 ```bash
 make free-disk-space ENV=my-private-cloud \
   ARGS='-e free_disk_space_apply=true -e free_disk_space_confirm=true'
 ```
 
-Higher-impact operations remain separate opt-ins:
+The following higher-impact operations remain separate opt-ins:
 
-- `free_disk_space_host_log_cleanup=true` and
-  `free_disk_space_truncate_host_logs=true` remove or truncate host logs.
-- `free_disk_space_docker_rotated_log_cleanup=true` truncates rotated Docker
-  JSON logs.
 - `free_disk_space_docker_volume_prune=true` prunes anonymous volumes;
-  `free_disk_space_aggressive=true` also prunes named volumes, active Docker
-  logs, and all unused images.
+  `free_disk_space_aggressive=true` also prunes named volumes and all unused
+  images.
 - `free_disk_space_mariadb_binlog_cleanup=true` additionally requires
   `free_disk_space_mariadb_replication_confirmed=true`; the playbook checks
   that every Galera node is synced and the cluster has the expected size.
-- `free_disk_space_opensearch_cleanup=true` deletes/closes dated `flog-*`
-  indices once, using the inventory's `openstack_kolla_internal_vip_address`.
 - `free_disk_space_discard_fluentd_retry=true` discards queued logs on each
   node and restarts Fluentd even if deletion fails.
+
+Host-log cleanup, Docker JSON-log cleanup, and dated `flog-*` retention are
+enabled by default once the mutation guard is explicitly enabled. Override
+their variables to `false` when preserving those logs is required.
 
 Store `free_disk_space_mariadb_root_password` in an encrypted vars file and
 pass it with `-e @file.yml` when the controller's `/etc/kolla/passwords.yml`

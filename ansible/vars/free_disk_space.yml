@@ -4,16 +4,16 @@
 free_disk_space_apply: false
 free_disk_space_confirm: false
 
-# Node-local cleanup.  The low-risk cache operations are enabled when
-# free_disk_space_apply is true.  Log and volume deletion require their own
-# opt-ins because they can remove operational or service state.
+# Node-local cleanup.  These defaults match the standalone compatibility
+# helper's normal log cleanup scope.  Mutations still require
+# free_disk_space_apply and free_disk_space_confirm.
 free_disk_space_journal_vacuum: true
 free_disk_space_journal_vacuum_size: 500M
 free_disk_space_kolla_logrotate: true
-free_disk_space_host_log_cleanup: false
-free_disk_space_truncate_host_logs: false
-free_disk_space_docker_rotated_log_cleanup: false
-free_disk_space_docker_active_log_cleanup: false
+free_disk_space_host_log_cleanup: true
+free_disk_space_truncate_host_logs: true
+free_disk_space_docker_rotated_log_cleanup: true
+free_disk_space_docker_active_log_cleanup: true
 free_disk_space_docker_image_prune: true
 free_disk_space_docker_volume_prune: false
 free_disk_space_docker_builder_prune: true
@@ -30,8 +30,10 @@ free_disk_space_mariadb_expected_cluster_size: "{{ groups['deployment_nodes'] | 
 free_disk_space_mariadb_password_file: /etc/kolla/passwords.yml
 
 # OpenSearch cleanup is cluster-wide and runs once, on the first deployment
-# node.  Keep the endpoint inventory-derived rather than hard-coded.
-free_disk_space_opensearch_cleanup: false
+# node.  Dated flog indices older than the hard retention cutoff are deleted;
+# indices between the hard and soft cutoffs are closed.  Keep the endpoint
+# inventory-derived rather than hard-coded.
+free_disk_space_opensearch_cleanup: true
 free_disk_space_opensearch_url: "http://{{ openstack_kolla_internal_vip_address | default('10.0.10.100') }}:9200"
 free_disk_space_opensearch_soft_retention_days: 3
 free_disk_space_opensearch_hard_retention_days: 7
