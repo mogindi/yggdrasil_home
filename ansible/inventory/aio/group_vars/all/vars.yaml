@@ -87,6 +87,11 @@ storage_ceph_rgw_frontend_port: 6780
 openstack_ceph_rgw_vip_port: 6780
 
 openstack_release: 2025.2
+# Keep Kolla's defaults at 2 GiB/14 days for other inventories.  The AIO
+# profile uses smaller MariaDB log allocations to reduce its local footprint.
+kolla_globals:
+  mariadb_innodb_log_file_size_mb: 1024
+  mariadb_binlog_expire_logs_days: 1
 # Kolla merges this host-specific YAML into the OpenSearch configuration.
 # Keep the disk watermarks below the full-disk condition while retaining
 # OpenSearch's default read-only protection at the flood stage.
