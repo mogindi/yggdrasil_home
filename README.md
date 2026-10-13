@@ -335,6 +335,10 @@ and filenames must be single safe path components. Inventory-generated
 files are tracked and removed when they are deleted from
 `kolla_custom_configs`.
 
+The AIO inventory overrides MariaDB's InnoDB redo-log file size to 1024 MiB
+and binary-log retention to one day. The Kolla defaults remain 2048 MiB and
+14 days for inventories that do not provide these overrides.
+
 7. **Validate inventory before deployment**
 
    ```bash

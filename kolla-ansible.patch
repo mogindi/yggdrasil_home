@@ -1,3 +1,22 @@
+diff --git a/ansible/group_vars/all/mariadb.yml b/ansible/group_vars/all/mariadb.yml
+--- a/ansible/group_vars/all/mariadb.yml
++++ b/ansible/group_vars/all/mariadb.yml
+@@ -39,4 +39,5 @@
+ # Allowed minimum is 4MB and maximum is 524288MB (512GB).
+ # Larger values mean less disk I/O due to less flushing checkpoint activity,
+ # but also slower recovery from a crash.
+ mariadb_innodb_log_file_size_mb: 2048
++mariadb_binlog_expire_logs_days: 14
+diff --git a/ansible/roles/mariadb/templates/galera.cnf.j2 b/ansible/roles/mariadb/templates/galera.cnf.j2
+--- a/ansible/roles/mariadb/templates/galera.cnf.j2
++++ b/ansible/roles/mariadb/templates/galera.cnf.j2
+@@ -20,5 +20,5 @@
+ log_bin=mysql-bin
+ binlog_format=ROW
+-expire_logs_days=14
++expire_logs_days={{ mariadb_binlog_expire_logs_days }}
+ default-storage-engine=innodb
+ innodb_autoinc_lock_mode=2
 diff --git a/ansible/roles/octavia/tasks/prepare.yml b/ansible/roles/octavia/tasks/prepare.yml
 index b75bcd548..9f80cdf7c 100644
 --- a/ansible/roles/octavia/tasks/prepare.yml
