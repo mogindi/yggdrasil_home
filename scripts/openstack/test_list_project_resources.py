@@ -240,6 +240,13 @@ class ProviderTests(unittest.TestCase):
         )
         connection.connect_as.assert_called_once_with(project_id="project-1")
 
+    def test_project_connection_falls_back_to_unscoped_admin_connection(self) -> None:
+        connection = mock.Mock()
+        connection.connect_as.side_effect = inventory.InventoryError("unauthorized")
+        project = inventory.Project("project-1", "Project", {})
+
+        self.assertIs(inventory._as_project_connection(connection, project), connection)
+
     def test_project_filter_uses_user_project_id_when_present(self) -> None:
         self.assertTrue(
             inventory._belongs_to_project(
