@@ -1683,7 +1683,14 @@ def _as_project_connection(connection: Any, project: Project) -> Any:
     current_project = getattr(connection, "current_project_id", None)
     if current_project and _text(current_project) == project.project_id:
         return connection
-    return _connection_as_project(connection, project.project_id)
+    try:
+        return _connection_as_project(connection, project.project_id)
+    except InventoryError:
+        # A system/admin credential can enumerate project-owned resources but
+        # may not be allowed to re-authenticate as the target project. Keep
+        # the original connection and let the providers apply project_id
+        # filters and ownership checks instead of failing the whole cleanup.
+        return connection
 
 
 def inventory(
