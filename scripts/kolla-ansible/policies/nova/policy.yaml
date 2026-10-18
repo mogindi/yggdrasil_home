@@ -1,4 +1,4 @@
 # Nova's keypair API supplies only user_id as the policy target. Allow project
 # members to create their own keypairs while keeping readers read-only.
 "os_compute_api:os-keypairs:create": "rule:context_is_admin or (role:member and user_id:%(user_id)s)"
-"os_compute_api:os-keypairs:delete": "rule:project_member_or_admin"
+"os_compute_api:os-keypairs:delete": "rule:context_is_admin or (role:member and user_id:%(user_id)s)"
