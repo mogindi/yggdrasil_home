@@ -38,6 +38,15 @@
         # source admin rc
         . $CONFIG_DIR/admin-openrc.sh
 
+        # Trove creates its instance security groups in the shared service
+        # project.  The default quota is too small for normal Trove and
+        # Octavia operation to coexist, so keep this quota explicit and
+        # configurable for multi-node deployments.
+        openstack quota set \
+          --secgroups "${TROVE_SERVICE_SECURITY_GROUPS:-50}" \
+          --secgroup-rules "${TROVE_SERVICE_SECURITY_GROUP_RULES:-500}" \
+          service
+
         source "{{ playbook_dir }}/../../scripts/openstack/image-utils.sh"
 
         image=trove-master-guest-ubuntu-noble
