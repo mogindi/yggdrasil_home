@@ -1681,7 +1681,16 @@ def resolve_provider(endpoint: Endpoint, connection: Any) -> Any:
 
 def _as_project_connection(connection: Any, project: Project) -> Any:
     current_project = getattr(connection, "current_project_id", None)
-    if current_project and _text(current_project) == project.project_id:
+    current_project = _text(current_project)
+    if current_project and current_project == project.project_id:
+        return connection
+    if current_project:
+        # An administrator's token is already authorized to enumerate other
+        # projects, but ``connect_as`` creates a new project-scoped session.
+        # That session commonly has no usable credentials (and returns 401
+        # from every service) even though the original admin session works.
+        # Keep the authenticated connection and let each provider apply its
+        # project_id filter and ownership check instead.
         return connection
     try:
         return _connection_as_project(connection, project.project_id)
