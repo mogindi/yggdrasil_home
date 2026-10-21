@@ -256,11 +256,13 @@ def _scalar_text(value: object) -> str:
 
 
 def _identifier(raw: Mapping[str, Any], service: str, resource: str) -> str:
-    keys = (
-        ("name", "id", "uuid")
-        if service == "workflow" and resource == "cron_trigger"
-        else ("id", "uuid", "name", "display_name", "stack_name")
-    )
+    if service == "workflow" and resource == "cron_trigger":
+        keys = ("name", "id", "uuid")
+    elif service == "alarm" and resource == "alarm":
+        # Aodh alarm names are not unique; delete by its stable alarm ID.
+        keys = ("alarm_id", "id", "uuid", "name", "display_name", "stack_name")
+    else:
+        keys = ("id", "uuid", "name", "display_name", "stack_name")
     for key in keys:
         value = _scalar_text(raw.get(key))
         if value:
