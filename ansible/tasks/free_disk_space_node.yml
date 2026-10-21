@@ -142,12 +142,40 @@
     - logs
 
 - name: Remove rotated host logs
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop: "{{ free_disk_space_rotated_host_logs.stdout_lines | default([]) }}"
-  loop_control:
-    label: "{{ item }}"
+  ansible.builtin.command:
+    argv:
+      - find
+      - /var/log
+      - -xdev
+      - -type
+      - f
+      - "("
+      - -name
+      - "*.log.[0-9]*"
+      - -o
+      - -name
+      - "*.log.gz"
+      - -o
+      - -name
+      - "syslog.[0-9]*"
+      - -o
+      - -name
+      - "syslog.*.gz"
+      - -o
+      - -name
+      - "messages.[0-9]*"
+      - -o
+      - -name
+      - "messages.*.gz"
+      - -o
+      - -name
+      - "dmesg.[0-9]*"
+      - -o
+      - -name
+      - "dmesg.*.gz"
+      - ")"
+      - -delete
+  changed_when: (free_disk_space_rotated_host_logs.stdout_lines | default([]) | length) > 0
   when:
     - free_disk_space_apply | bool
     - free_disk_space_host_log_cleanup | bool
@@ -190,14 +218,35 @@
 - name: Truncate current host logs
   ansible.builtin.command:
     argv:
+      - find
+      - /var/log
+      - -xdev
+      - -type
+      - f
+      - "("
+      - -name
+      - "*.log"
+      - -o
+      - -name
+      - syslog
+      - -o
+      - -name
+      - messages
+      - -o
+      - -name
+      - kern.log
+      - -o
+      - -name
+      - dmesg
+      - ")"
+      - -exec
       - truncate
       - -s
       - "0"
       - --
-      - "{{ item }}"
-  loop: "{{ free_disk_space_current_host_logs.stdout_lines | default([]) }}"
-  loop_control:
-    label: "{{ item }}"
+      - "{}"
+      - "+"
+  changed_when: (free_disk_space_current_host_logs.stdout_lines | default([]) | length) > 0
   when:
     - free_disk_space_apply | bool
     - free_disk_space_truncate_host_logs | bool
@@ -226,12 +275,17 @@
     - logs
 
 - name: Remove rotated Docker JSON logs
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop: "{{ free_disk_space_rotated_docker_logs.stdout_lines | default([]) }}"
-  loop_control:
-    label: "{{ item }}"
+  ansible.builtin.command:
+    argv:
+      - find
+      - /var/lib/docker/containers
+      - -xdev
+      - -type
+      - f
+      - -name
+      - "*-json.log.[1-9]*"
+      - -delete
+  changed_when: (free_disk_space_rotated_docker_logs.stdout_lines | default([]) | length) > 0
   when:
     - free_disk_space_apply | bool
     - free_disk_space_docker_rotated_log_cleanup | bool
@@ -291,15 +345,29 @@
     - kolla
 
 - name: Remove rotated Kolla logs
-  ansible.builtin.file:
-    path: "{{ item.path }}"
-    state: absent
-  loop: "{{ free_disk_space_rotated_kolla_logs.files | default([]) }}"
-  loop_control:
-    label: "{{ item.path }}"
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim }}"
+      - -type
+      - f
+      - "("
+      - -name
+      - "*.log.[0-9]*"
+      - -o
+      - -name
+      - "*.log.gz"
+      - -o
+      - -name
+      - "*.log.20??-??-??.*"
+      - ")"
+      - -delete
+  changed_when: (free_disk_space_rotated_kolla_logs.matched | default(0) | int) > 0
   when:
     - free_disk_space_apply | bool
     - free_disk_space_kolla_rotated_log_cleanup | bool
+    - free_disk_space_kolla_logs_mountpoint.rc | default(1) == 0
+    - free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim | length > 0
   tags:
     - node
     - logs
@@ -340,17 +408,25 @@
 - name: Truncate current Kolla logs
   ansible.builtin.command:
     argv:
+      - find
+      - "{{ free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim }}"
+      - -type
+      - f
+      - -name
+      - "*.log"
+      - -exec
       - truncate
       - -s
       - "0"
       - --
-      - "{{ item.path }}"
-  loop: "{{ free_disk_space_current_kolla_logs.files | default([]) }}"
-  loop_control:
-    label: "{{ item.path }}"
+      - "{}"
+      - "+"
+  changed_when: (free_disk_space_current_kolla_logs.matched | default(0) | int) > 0
   when:
     - free_disk_space_apply | bool
     - free_disk_space_kolla_active_log_cleanup | bool
+    - free_disk_space_kolla_logs_mountpoint.rc | default(1) == 0
+    - free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim | length > 0
   tags:
     - node
     - logs
@@ -379,14 +455,21 @@
 - name: Truncate active Docker JSON logs
   ansible.builtin.command:
     argv:
+      - find
+      - /var/lib/docker/containers
+      - -xdev
+      - -type
+      - f
+      - -name
+      - "*-json.log"
+      - -exec
       - truncate
       - -s
       - "0"
       - --
-      - "{{ item }}"
-  loop: "{{ free_disk_space_active_docker_logs.stdout_lines | default([]) }}"
-  loop_control:
-    label: "{{ item }}"
+      - "{}"
+      - "+"
+  changed_when: (free_disk_space_active_docker_logs.stdout_lines | default([]) | length) > 0
   when:
     - free_disk_space_apply | bool
     - (free_disk_space_docker_active_log_cleanup | bool) or (free_disk_space_aggressive | bool)
@@ -545,14 +628,12 @@
 
 - name: Remove Cypress cache contents
   ansible.builtin.file:
-    path: "{{ item.path }}"
+    path: /root/.cache/Cypress
     state: absent
-  loop: "{{ free_disk_space_cypress_cache.files | default([]) | sort(attribute='path', reverse=true) }}"
-  loop_control:
-    label: "{{ item.path }}"
   when:
     - free_disk_space_apply | bool
     - free_disk_space_package_cache_cleanup | bool
+    - (free_disk_space_cypress_cache.files | default([]) | length) > 0
   tags:
     - node
     - packages
