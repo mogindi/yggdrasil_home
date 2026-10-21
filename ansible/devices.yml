@@ -645,6 +645,98 @@
         enabled: yes
         daemon_reload: yes
 
+- name: Enable containerd CRI for Zun capsule runtimes
+  hosts: deployment_nodes
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Configure Zun CNI for Capsule CRI
+      when: openstack_zun_kata_enabled | default(false) | bool
+      tags:
+        - kata
+      block:
+        - name: Create containerd CNI configuration directory
+          ansible.builtin.file:
+            path: /etc/cni/net.d
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+
+        - name: Install Zun CNI plugin proxy
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../scripts/devices/zun_cni_container_plugin.py"
+            dest: /opt/cni/bin/zun-cni
+            owner: root
+            group: root
+            mode: '0755'
+          notify: Restart containerd for Zun capsule CRI
+
+        - name: Install Zun CNI network configuration
+          ansible.builtin.copy:
+            dest: /etc/cni/net.d/10-zun-cni.conf
+            owner: root
+            group: root
+            mode: '0644'
+            content: |
+              {
+                "cniVersion": "0.3.1",
+                "name": "zun",
+                "type": "zun-cni",
+                "zun_conf": "/etc/zun/zun.conf"
+              }
+          notify: Restart containerd for Zun capsule CRI
+
+    - name: Configure containerd CRI and Kata runtime handler
+      ansible.builtin.script:
+        cmd: >-
+          {{ playbook_dir }}/../scripts/devices/configure_containerd_cri.py
+          /etc/containerd/config.toml --check-runtime-load
+        executable: /usr/bin/python3
+      register: containerd_cri_configuration
+      changed_when: containerd_cri_configuration.stdout | trim == 'changed'
+      notify: Restart containerd for Zun capsule CRI
+      when: openstack_zun_kata_enabled | default(false) | bool
+      tags:
+        - kata
+
+    - name: Apply containerd CRI configuration on this node
+      ansible.builtin.meta: flush_handlers
+      tags:
+        - kata
+
+    - name: Inspect containerd runtime plugins
+      ansible.builtin.command: ctr plugins ls
+      register: containerd_cri_plugins
+      changed_when: false
+      when: openstack_zun_kata_enabled | default(false) | bool
+      tags:
+        - kata
+
+    - name: Require active containerd CRI runtime plugins
+      ansible.builtin.assert:
+        that:
+          - >-
+            (containerd_cri_plugins.stdout is
+             search('(?m)^io\.containerd\.cri\.v1\s+runtime\s') and
+             containerd_cri_plugins.stdout is
+             search('(?m)^io\.containerd\.cri\.v1\s+images\s')) or
+            containerd_cri_plugins.stdout is
+            search('(?m)^io\.containerd\.grpc\.v1\s+cri\s')
+          - "' error ' not in containerd_cri_plugins.stdout"
+        fail_msg: >-
+          The containerd CRI runtime plugin is not active on this deployment node.
+      when: openstack_zun_kata_enabled | default(false) | bool
+      tags:
+        - kata
+
+  handlers:
+    - name: Restart containerd for Zun capsule CRI
+      ansible.builtin.systemd:
+        name: containerd.service
+        state: restarted
+        daemon_reload: true
+
 - name: Remove internet connectivity script and destroy loop devices
   hosts: deployment_nodes
   any_errors_fatal: true

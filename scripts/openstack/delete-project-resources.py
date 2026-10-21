@@ -120,6 +120,7 @@ RESOURCE_ALIASES = {
     "rbac_policies": "rbac_policy",
     "record_sets": "recordset",
     "recordsets": "recordset",
+    "receivers": "receiver",
     "security_group_rules": "security_group_rule",
     "security_groups": "security_group",
     "server_groups": "server_group",
@@ -167,9 +168,11 @@ RESOURCE_PHASES = {
     ("dns", "recordset"): 36,
     ("dns", "zone"): 37,
     ("alarm", "alarm"): 34,
+    ("clustering", "receiver"): 39,
     ("clustering", "cluster"): 40,
-    ("clustering", "policy"): 41,
-    ("clustering", "profile"): 41,
+    ("clustering", "node"): 41,
+    ("clustering", "policy"): 42,
+    ("clustering", "profile"): 42,
     ("orchestration", "stack"): 40,
     ("orchestration", "software_deployment"): 41,
     ("orchestration", "software_config"): 42,
@@ -319,6 +322,8 @@ def command_for(resource: Resource) -> tuple[str, ...]:
             "cluster": ("cluster", "delete", "--force"),
             "policy": ("cluster", "policy", "delete", "--force"),
             "profile": ("cluster", "profile", "delete", "--force"),
+            "node": ("cluster", "node", "delete", "--force"),
+            "receiver": ("cluster", "receiver", "delete"),
         }
         if kind in commands:
             return (*commands[kind], identifier)
@@ -617,6 +622,7 @@ def execute_plan(
     poll_seconds: float = DEFAULT_POLL_SECONDS,
 ) -> list[str]:
     errors: list[str] = []
+    clustering = None
     for operation in operations:
         resource = operation.resource
         print(
@@ -624,6 +630,29 @@ def execute_plan(
             f"{resource.service}/{resource.resource} {resource.identifier}: "
             f"{' '.join(operation.argv)}"
         )
+        if resource.service == "clustering":
+            if clustering is None:
+                try:
+                    import openstack
+
+                    clustering = openstack.connect(
+                        load_yaml_config=False
+                    ).clustering
+                except Exception as exc:
+                    errors.append(
+                        "clustering: unable to initialize OpenStack SDK "
+                        f"({exc.__class__.__name__})"
+                    )
+                    continue
+            errors.extend(
+                delete_senlin_resource(
+                    resource,
+                    clustering=clustering,
+                    wait_seconds=wait_seconds,
+                    poll_seconds=poll_seconds,
+                )
+            )
+            continue
         if resource.resource == "router":
             errors.extend(delete_router(openstack_bin, resource))
             continue
@@ -643,6 +672,97 @@ def execute_plan(
             if error:
                 errors.append(f"stack {resource.identifier}: {error}")
     return errors
+
+
+def delete_senlin_resource(
+    resource: Resource,
+    *,
+    clustering: Any,
+    wait_seconds: float,
+    poll_seconds: float,
+) -> list[str]:
+    """Delete a Senlin resource, waiting for asynchronous cluster/node actions."""
+
+    kind = resource.resource
+    identifier = resource.identifier
+    getters = {
+        "cluster": clustering.get_cluster,
+        "node": clustering.get_node,
+        "policy": clustering.get_policy,
+        "profile": clustering.get_profile,
+        "receiver": clustering.get_receiver,
+    }
+    deleters = {
+        "cluster": lambda: clustering.delete_cluster(
+            identifier, force_delete=True
+        ),
+        "node": lambda: clustering.delete_node(identifier, force_delete=True),
+        "policy": lambda: clustering.delete_policy(identifier),
+        "profile": lambda: clustering.delete_profile(identifier),
+        "receiver": lambda: clustering.delete_receiver(identifier),
+    }
+    getter = getters.get(kind)
+    deleter = deleters.get(kind)
+    if getter is None or deleter is None:
+        return [f"clustering/{kind}/{identifier}: unsupported Senlin resource"]
+
+    try:
+        getter(identifier)
+    except Exception as exc:
+        if exc.__class__.__name__ == "NotFoundException":
+            return []
+        return [
+            f"clustering/{kind}/{identifier}: unable to load Senlin resource "
+            f"({exc.__class__.__name__})"
+        ]
+
+    try:
+        action = deleter()
+    except Exception as exc:
+        if exc.__class__.__name__ == "NotFoundException":
+            return []
+        return [
+            f"clustering/{kind}/{identifier}: delete request failed "
+            f"({exc.__class__.__name__})"
+        ]
+
+    action_id = getattr(action, "id", None)
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        try:
+            getter(identifier)
+        except Exception as exc:
+            if exc.__class__.__name__ == "NotFoundException":
+                return []
+            return [
+                f"clustering/{kind}/{identifier}: resource lookup failed "
+                f"({exc.__class__.__name__})"
+            ]
+
+        if action_id:
+            try:
+                current_action = clustering.get_action(action_id)
+            except Exception as exc:
+                if exc.__class__.__name__ == "NotFoundException":
+                    current_action = None
+                else:
+                    return [
+                        f"clustering/{kind}/{identifier}: action lookup failed "
+                        f"({exc.__class__.__name__})"
+                    ]
+            status = str(getattr(current_action, "status", "")).upper()
+            if status in {"FAILED", "CANCELLED"}:
+                return [
+                    f"clustering/{kind}/{identifier}: Senlin deletion "
+                    f"action entered {status}"
+                ]
+
+        time.sleep(poll_seconds)
+
+    return [
+        f"clustering/{kind}/{identifier}: Senlin resource remained after "
+        f"{wait_seconds:.0f} seconds"
+    ]
 
 
 def run_inventory(

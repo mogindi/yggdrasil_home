@@ -25,4 +25,10 @@ COPY api-paste.ini /etc/senlin/api-paste.ini
 COPY kolla_extend_start /usr/local/bin/kolla_extend_start
 COPY kolla_senlin_extend_start /usr/local/bin/kolla_senlin_extend_start
 
+COPY zun-capsule-profile /tmp/yggdrasil-senlin-zun-profile
+RUN /var/lib/kolla/venv/bin/pip install --no-cache-dir --no-deps \
+    --no-build-isolation \
+    /tmp/yggdrasil-senlin-zun-profile \
+    && rm -rf /tmp/yggdrasil-senlin-zun-profile
+
 USER senlin

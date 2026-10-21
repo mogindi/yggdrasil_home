@@ -165,11 +165,13 @@ set_global_config enable_zun "$OPENSTACK_ZUN_KATA_ENABLED"
 
 if is_enabled "$OPENSTACK_ZUN_KATA_ENABLED"; then
 	set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true, "runtimes": { "kata": { "runtimeType": "io.containerd.kata.v2" } } }'
-	set_global_config zun_compute_extra_volumes '["/etc/zun/docker-pki:/etc/zun/docker-pki:ro"]'
+	set_global_config zun_compute_extra_volumes '["/etc/zun/docker-pki:/etc/zun/docker-pki:ro", "/proc:/host/proc:ro"]'
+	set_global_config zun_cni_daemon_extra_volumes '["/proc:/host/proc:ro"]'
 	set_global_config zun_wsproxy_extra_volumes '["/etc/zun/docker-pki:/etc/zun/docker-pki:ro"]'
 else
 	set_global_config docker_custom_config '{ "live-restore": true, "ip-forward-no-drop": true }'
 	set_global_config zun_compute_extra_volumes '[]'
+	set_global_config zun_cni_daemon_extra_volumes '[]'
 	set_global_config zun_wsproxy_extra_volumes '[]'
 fi
 
@@ -407,6 +409,10 @@ api_insecure = false
 ca_file = /etc/zun/docker-pki/ca.pem
 cert_file = /etc/zun/docker-pki/cert.pem
 key_file = /etc/zun/docker-pki/key.pem
+
+[cni_daemon]
+docker_mode = true
+netns_proc_dir = /host/proc
 EOF
 	cat > etc/kolla/config/zun/policy.yaml <<'EOF'
 # Cloud Shell images are built locally on each Zun node, so project owners
@@ -466,6 +472,15 @@ sources:
         - ip.floating
         - radosgw.objects.size
 EOF
+
+if is_enabled "$OPENSTACK_ZUN_KATA_ENABLED"; then
+	cat >> etc/kolla/config/ceilometer/polling.yaml <<'EOF'
+    - name: yggdrasil_zun_capsule_cpu
+      interval: 60
+      meters:
+        - yggdrasil.zun.capsule.cpu_util
+EOF
+fi
 
 mkdir -p etc/kolla/config/cloudkitty
 METRICS_SOURCE="$CLOUDKITTY_METRICS_FILE"
