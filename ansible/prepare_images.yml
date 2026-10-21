@@ -42,6 +42,8 @@
         mode: preserve
       loop:
         - scripts/kolla-ansible/patch-zun-cpu-stats.py
+        - scripts/kolla-ansible/patch-zun-capsule-stats.py
+        - scripts/kolla-ansible/patch-zun-cri-capsule-stats.py
         - scripts/kolla-ansible/patch-zun-cri-v1.py
         - scripts/kolla-ansible/patch-zun-wsproxy-mtls.py
         - scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
@@ -172,6 +174,20 @@
                 dest: /tmp/patch-zun-cri-v1.py
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-zun-cri-v1.py
+          - image: quay.io/openstack.kolla/zun-api:{{ image_version }}
+            customize_marker: customize-zun-api-capsule-stats-v2.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-capsule-stats.py
+                dest: /tmp/patch-zun-capsule-stats.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-capsule-stats.py
+          - image: quay.io/openstack.kolla/zun-compute:{{ image_version }}
+            customize_marker: customize-zun-compute-cri-capsule-stats-v1.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-cri-capsule-stats.py
+                dest: /tmp/patch-zun-cri-capsule-stats.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-cri-capsule-stats.py
           - image: quay.io/openstack.kolla/zun-wsproxy:{{ image_version }}
             customize_marker: customize-zun-wsproxy-mtls-v1.done
             custom_files:
@@ -270,7 +286,7 @@
               chmod 644 /dev/shm/$(hostname)_nova-novncproxy_qmanager
               EOF
           - image: quay.io/openstack.kolla/ceilometer-central:{{ image_version }}
-            customize_marker: customize-ceilometer-zun-capsule-v1.done
+            customize_marker: customize-ceilometer-zun-capsule-v9.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
@@ -281,7 +297,7 @@
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-ceilometer-gnocchi-resource.py
               /var/lib/kolla/venv/bin/python /tmp/patch-ceilometer-zun-capsule.py
-              /var/lib/kolla/venv/bin/pip install --no-cache-dir --no-deps --no-build-isolation /tmp/ceilometer-zun-capsule
+              /var/lib/kolla/venv/bin/pip install --force-reinstall --no-cache-dir --no-deps --no-build-isolation /tmp/ceilometer-zun-capsule
           - image: quay.io/openstack.kolla/ceilometer-compute:{{ image_version }}
             customize_marker: customize-ceilometer-gnocchi-resource-v2.done
             custom_files:
@@ -290,7 +306,7 @@
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-ceilometer-gnocchi-resource.py
           - image: quay.io/openstack.kolla/ceilometer-notification:{{ image_version }}
-            customize_marker: customize-ceilometer-zun-capsule-v1.done
+            customize_marker: customize-ceilometer-zun-capsule-v9.done
             custom_files:
               - src: scripts/kolla-ansible/patch-ceilometer-gnocchi-resource.py
                 dest: /tmp/patch-ceilometer-gnocchi-resource.py
@@ -313,6 +329,20 @@
                 dest: /tmp/patch-zun-cri-v1.py
             custom_cmds: |
               /var/lib/kolla/venv/bin/python /tmp/patch-zun-cri-v1.py
+          - image: quay.io/openstack.kolla/zun-api:{{ image_version }}
+            customize_marker: customize-zun-api-capsule-stats-v2.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-capsule-stats.py
+                dest: /tmp/patch-zun-capsule-stats.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-capsule-stats.py
+          - image: quay.io/openstack.kolla/zun-compute:{{ image_version }}
+            customize_marker: customize-zun-compute-cri-capsule-stats-v1.done
+            custom_files:
+              - src: scripts/kolla-ansible/patch-zun-cri-capsule-stats.py
+                dest: /tmp/patch-zun-cri-capsule-stats.py
+            custom_cmds: |
+              /var/lib/kolla/venv/bin/python /tmp/patch-zun-cri-capsule-stats.py
           - image: quay.io/openstack.kolla/zun-wsproxy:{{ image_version }}
             customize_marker: customize-zun-wsproxy-mtls-v1.done
             custom_files:
@@ -372,6 +402,7 @@
         docker rm -f tmp_build 2>/dev/null || true
         docker run -it -d --network host -u root --name tmp_build {{ item.item.image }} bash
         {% for custom_file in item.item.custom_files | default([]) %}
+        docker exec tmp_build rm -rf {{ custom_file.dest }}
         docker cp {{ image_build_dir.path }}/{{ custom_file.src }} tmp_build:{{ custom_file.dest }}
         {% endfor %}
         docker exec tmp_build bash -c "set -xe; (ls {{ item.item.customize_marker | default('customize.done') }} && touch do_not_commit) || ( {{ item.item.custom_cmds }} ) && touch {{ item.item.customize_marker | default('customize.done') }}" || (docker rm -f tmp_build; exit 1)

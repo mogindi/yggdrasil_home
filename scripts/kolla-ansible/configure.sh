@@ -477,6 +477,10 @@ if is_enabled "$OPENSTACK_ZUN_KATA_ENABLED"; then
 	cat >> etc/kolla/config/ceilometer/polling.yaml <<'EOF'
     - name: yggdrasil_zun_capsule_cpu
       interval: 60
+      # The pollster enumerates Capsules through Zun itself. A single static
+      # resource schedules that global query on one Ceilometer poller.
+      resources:
+        - zun://capsules
       meters:
         - yggdrasil.zun.capsule.cpu_util
 EOF

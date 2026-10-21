@@ -53,20 +53,12 @@ class CapsuleCpuUtilPollster(plugin_base.PollsterBase):
             if next_url:
                 next_url = urljoin(base_url, next_url)
 
-    @staticmethod
-    def _container_ids(capsule):
-        for container in capsule.get("containers") or []:
-            if isinstance(container, str):
-                yield container
-            elif isinstance(container, dict):
-                container_id = container.get("uuid") or container.get("id")
-                if container_id:
-                    yield container_id
-
-    def _container_cpu(self, session, base_url, container_id):
+    def _capsule_cpu(self, session, base_url, capsule_id):
         try:
             response = session.get(
-                urljoin(base_url, f"containers/{container_id}/stats"), timeout=30
+                urljoin(base_url, f"capsules/{capsule_id}/stats"),
+                params={"all_projects": 1},
+                timeout=30,
             )
             payload = self._json(response)
             if "stats_info" in payload and isinstance(payload["stats_info"], dict):
@@ -77,25 +69,18 @@ class CapsuleCpuUtilPollster(plugin_base.PollsterBase):
             return float(str(value).strip().rstrip("%"))
         except Exception as error:
             LOG.warning(
-                "Could not poll CPU for Zun container %s: %s", container_id, error
+                "Could not poll CPU for Zun capsule %s: %s", capsule_id, error
             )
             return None
 
     def get_samples(self, manager, cache, resources):
         session, base_url = self._api_context(manager)
         for capsule in self._capsules(session, base_url):
-            labels = capsule.get("labels") or {}
+            # Zun serializes Kubernetes-style capsule labels as meta_labels.
+            # Keep the labels fallback for older API representations.
+            labels = capsule.get("meta_labels") or capsule.get("labels") or {}
             cluster_id = labels.get("yggdrasil_senlin_cluster_id")
             if not cluster_id:
-                continue
-
-            cpu_values = [
-                value
-                for container_id in self._container_ids(capsule)
-                if (value := self._container_cpu(session, base_url, container_id))
-                is not None
-            ]
-            if not cpu_values:
                 continue
 
             capsule_id = capsule.get("uuid") or capsule.get("id")
@@ -104,19 +89,23 @@ class CapsuleCpuUtilPollster(plugin_base.PollsterBase):
                 LOG.warning("Skipping Zun capsule with incomplete Senlin labels")
                 continue
 
-            original_resource_id = (
+            cpu_utilization = self._capsule_cpu(session, base_url, capsule_id)
+            if cpu_utilization is None:
+                continue
+
+            senlin_resource_id = (
                 f"{RESOURCE_ID_PREFIX}{cluster_id}_{node_id}"
             )
             yield sample.Sample(
                 name=METER_NAME,
                 type=sample.TYPE_GAUGE,
                 unit="%",
-                volume=sum(cpu_values) / len(cpu_values),
+                volume=cpu_utilization,
                 user_id=capsule.get("user_id"),
                 project_id=capsule.get("project_id"),
                 resource_id=capsule_id,
                 resource_metadata={
-                    "original_resource_id": original_resource_id,
+                    "yggdrasil_senlin_resource_id": senlin_resource_id,
                     "cluster_id": str(cluster_id),
                     "node_id": str(node_id),
                     "display_name": capsule.get("name", ""),
