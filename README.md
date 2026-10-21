@@ -465,7 +465,8 @@ re-ingest procedure.
 Use `ansible/free_disk_space.yml` for disk cleanup across a multi-node
 inventory. It targets only `deployment_nodes`, processes node-local work with
 `serial: 1`, and evaluates the OpenSearch cleanup once for the cluster. The
-playbook is read-only by default:
+playbook itself is read-only by default, but the Make target passes the
+mutation guards by default:
 
 The older `scripts/openstack/ops/free_disk_space.sh` remains a single-host
 compatibility helper and does not read Ansible inventory.
@@ -474,14 +475,17 @@ compatibility helper and does not read Ansible inventory.
 make free-disk-space ENV=my-private-cloud
 ```
 
-To apply the baseline cleanup (journal vacuuming, Kolla log rotation, host-log
-cleanup, current and rotated Docker JSON-log cleanup, active Docker JSON-log
-truncation, dated `flog-*` retention, dangling images, builder cache, and
-package caches), explicitly enable mutations:
+The target applies journal rotation and vacuuming, clears the kernel ring and
+traditional system logs, removes rotated host/Kolla/Docker logs, truncates live
+host/Kolla/Docker logs, deletes dated `flog-*` indices older than one day,
+prunes dangling images and builder cache, and cleans package caches. Kolla
+rotated logs are discovered through the `kolla_logs` Docker volume.
+
+To invoke the playbook in its read-only mode, clear the Make target's default
+extra variables:
 
 ```bash
-make free-disk-space ENV=my-private-cloud \
-  ARGS='-e free_disk_space_apply=true -e free_disk_space_confirm=true'
+make free-disk-space ENV=my-private-cloud FREE_DISK_SPACE_ARGS=''
 ```
 
 The following higher-impact operations remain separate opt-ins:
@@ -495,9 +499,9 @@ The following higher-impact operations remain separate opt-ins:
 - `free_disk_space_discard_fluentd_retry=true` discards queued logs on each
   node and restarts Fluentd even if deletion fails.
 
-Host-log cleanup, Docker JSON-log cleanup, and dated `flog-*` retention are
-enabled by default once the mutation guard is explicitly enabled. Override
-their variables to `false` when preserving those logs is required.
+Host-log cleanup, Kolla log cleanup, Docker JSON-log cleanup, and dated
+`flog-*` retention are enabled by default by the Make target. Override their
+variables to `false` when preserving those logs is required.
 
 Store `free_disk_space_mariadb_root_password` in an encrypted vars file and
 pass it with `-e @file.yml` when the controller's `/etc/kolla/passwords.yml`

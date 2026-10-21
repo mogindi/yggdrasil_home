@@ -6,7 +6,30 @@
   tags:
     - node
 
-- name: Vacuum the systemd journal
+- name: Rotate the systemd journal
+  ansible.builtin.command: journalctl --rotate
+  register: free_disk_space_journal_rotate
+  changed_when: free_disk_space_journal_rotate.rc == 0
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_journal_vacuum | bool
+  tags:
+    - node
+    - logs
+
+- name: Vacuum old systemd journal files by age
+  ansible.builtin.command:
+    argv:
+      - journalctl
+      - "--vacuum-time={{ free_disk_space_journal_vacuum_time }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_journal_vacuum | bool
+  tags:
+    - node
+    - logs
+
+- name: Vacuum systemd journal files by size
   ansible.builtin.command:
     argv:
       - journalctl
@@ -14,6 +37,18 @@
   when:
     - free_disk_space_apply | bool
     - free_disk_space_journal_vacuum | bool
+  tags:
+    - node
+    - logs
+
+- name: Clear the live kernel ring buffer used by dmesg
+  ansible.builtin.command: dmesg --clear
+  register: free_disk_space_kernel_ring
+  changed_when: free_disk_space_kernel_ring.rc == 0
+  failed_when: false
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_clear_kernel_ring | bool
   tags:
     - node
     - logs
@@ -71,6 +106,24 @@
       - -o
       - -name
       - "*.log.gz"
+      - -o
+      - -name
+      - "syslog.[0-9]*"
+      - -o
+      - -name
+      - "syslog.*.gz"
+      - -o
+      - -name
+      - "messages.[0-9]*"
+      - -o
+      - -name
+      - "messages.*.gz"
+      - -o
+      - -name
+      - "dmesg.[0-9]*"
+      - -o
+      - -name
+      - "dmesg.*.gz"
       - ")"
       - -print
   register: free_disk_space_rotated_host_logs
@@ -110,8 +163,22 @@
       - -xdev
       - -type
       - f
+      - "("
       - -name
       - "*.log"
+      - -o
+      - -name
+      - syslog
+      - -o
+      - -name
+      - messages
+      - -o
+      - -name
+      - kern.log
+      - -o
+      - -name
+      - dmesg
+      - ")"
       - -print
   register: free_disk_space_current_host_logs
   changed_when: false
@@ -158,14 +225,10 @@
     - docker
     - logs
 
-- name: Truncate rotated Docker JSON logs
-  ansible.builtin.command:
-    argv:
-      - truncate
-      - -s
-      - "0"
-      - --
-      - "{{ item }}"
+- name: Remove rotated Docker JSON logs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
   loop: "{{ free_disk_space_rotated_docker_logs.stdout_lines | default([]) }}"
   loop_control:
     label: "{{ item }}"
@@ -176,6 +239,122 @@
     - node
     - docker
     - logs
+
+- name: Locate the Kolla logs volume
+  ansible.builtin.command:
+    cmd: >-
+      docker volume inspect --format
+      '{% raw %}{{.Mountpoint}}{% endraw %}' kolla_logs
+  register: free_disk_space_kolla_logs_mountpoint
+  changed_when: false
+  failed_when: false
+  when:
+    - (free_disk_space_kolla_rotated_log_cleanup | bool) or
+      (free_disk_space_kolla_active_log_cleanup | bool)
+  tags:
+    - node
+    - logs
+    - kolla
+
+- name: Find rotated Kolla logs
+  ansible.builtin.find:
+    paths:
+      - "{{ free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim }}"
+    recurse: true
+    hidden: true
+    file_type: file
+    patterns:
+      - "*.log.[0-9]*"
+      - "*.log.gz"
+      - "*.log.20??-??-??.*"
+  register: free_disk_space_rotated_kolla_logs
+  failed_when: false
+  when:
+    - free_disk_space_kolla_rotated_log_cleanup | bool
+    - free_disk_space_kolla_logs_mountpoint.rc | default(1) == 0
+    - free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim | length > 0
+  tags:
+    - node
+    - logs
+    - kolla
+
+- name: Report rotated Kolla log count
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: found
+      {{ free_disk_space_rotated_kolla_logs.matched | default(0) }}
+      rotated Kolla logs
+  when: free_disk_space_kolla_rotated_log_cleanup | bool
+  tags:
+    - node
+    - logs
+    - kolla
+
+- name: Remove rotated Kolla logs
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ free_disk_space_rotated_kolla_logs.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_kolla_rotated_log_cleanup | bool
+  tags:
+    - node
+    - logs
+    - kolla
+
+- name: Find current Kolla logs
+  ansible.builtin.find:
+    paths:
+      - "{{ free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim }}"
+    recurse: true
+    hidden: true
+    file_type: file
+    patterns:
+      - "*.log"
+  register: free_disk_space_current_kolla_logs
+  failed_when: false
+  when:
+    - free_disk_space_kolla_active_log_cleanup | bool
+    - free_disk_space_kolla_logs_mountpoint.rc | default(1) == 0
+    - free_disk_space_kolla_logs_mountpoint.stdout | default('') | trim | length > 0
+  tags:
+    - node
+    - logs
+    - kolla
+
+- name: Report current Kolla log count
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: found
+      {{ free_disk_space_current_kolla_logs.matched | default(0) }}
+      current Kolla logs to truncate
+  when: free_disk_space_kolla_active_log_cleanup | bool
+  tags:
+    - node
+    - logs
+    - kolla
+
+- name: Truncate current Kolla logs
+  ansible.builtin.command:
+    argv:
+      - truncate
+      - -s
+      - "0"
+      - --
+      - "{{ item.path }}"
+  loop: "{{ free_disk_space_current_kolla_logs.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_kolla_active_log_cleanup | bool
+  tags:
+    - node
+    - logs
+    - kolla
 
 - name: Find active Docker JSON logs for aggressive cleanup
   ansible.builtin.command:

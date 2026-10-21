@@ -4,7 +4,8 @@
 #
 #   ansible-playbook ansible/free_disk_space.yml
 #
-# The default is a read-only plan.  To apply the low-risk node cleanup, pass:
+# The playbook remains read-only when invoked directly.  The Make target
+# supplies these mutation guards by default:
 #
 #   -e free_disk_space_apply=true -e free_disk_space_confirm=true
 #
@@ -77,12 +78,17 @@
         msg:
           - "{{ inventory_hostname }}: {{ free_disk_space_before.stdout_lines | default([]) | join(' ') }}"
           - "apply={{ free_disk_space_apply | bool }}"
+          - "journal_vacuum_time={{ free_disk_space_journal_vacuum_time }}"
+          - "clear_kernel_ring={{ free_disk_space_clear_kernel_ring | bool }}"
           - "host_log_cleanup={{ free_disk_space_host_log_cleanup | bool }}"
           - "truncate_host_logs={{ free_disk_space_truncate_host_logs | bool }}"
+          - "kolla_rotated_log_cleanup={{ free_disk_space_kolla_rotated_log_cleanup | bool }}"
+          - "kolla_active_log_cleanup={{ free_disk_space_kolla_active_log_cleanup | bool }}"
           - "docker_rotated_log_cleanup={{ free_disk_space_docker_rotated_log_cleanup | bool }}"
           - "docker_active_log_cleanup={{ free_disk_space_docker_active_log_cleanup | bool }}"
           - "docker_volume_prune={{ free_disk_space_docker_volume_prune | bool }}"
           - "opensearch_cleanup={{ free_disk_space_opensearch_cleanup | bool }}"
+          - "opensearch_hard_retention_days={{ free_disk_space_opensearch_hard_retention_days }}"
           - "mariadb_binlog_cleanup={{ free_disk_space_mariadb_binlog_cleanup | bool }}"
           - "fluentd_retry_discard={{ free_disk_space_discard_fluentd_retry | bool }}"
 

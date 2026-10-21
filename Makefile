@@ -3,6 +3,9 @@ SHELL:=/bin/bash
 ENV = hetzner-vagrant-dev01
 ARGS = 
 TAGS = 
+# The Make target is intentionally destructive by default. Set this variable
+# to an empty value to invoke the playbook in its read-only mode instead.
+FREE_DISK_SPACE_ARGS ?= -e free_disk_space_apply=true -e free_disk_space_confirm=true
 # Keystone roles used by Yggdrasil's project-scoped policies and enabled
 # service integrations. Kolla creates many of the service roles itself, but
 # keeping the complete list here makes post-deploy role setup repeatable.
@@ -98,7 +101,7 @@ openstack-client-install:
 	ansible-playbook ansible/client.yml $(VAULT_ARGS) $(ARGS)
 
 free-disk-space:
-	ansible-playbook ansible/free_disk_space.yml $(VAULT_ARGS) $(ARGS)
+	ansible-playbook ansible/free_disk_space.yml $(VAULT_ARGS) $(FREE_DISK_SPACE_ARGS) $(ARGS)
 
 openstack-roles: kollaansible-postdeploy openstack-client-install
 	OPENSTACK_KOLLA_WORKSPACE="$(CURDIR)/workspace" \
