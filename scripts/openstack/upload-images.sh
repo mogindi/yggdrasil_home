@@ -3,12 +3,13 @@
 set -xe
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 deployment_workspace="${TROVE_WORKSPACE:-}"
 if [[ -n "$deployment_workspace" ]]; then
   workspace_candidates=("$deployment_workspace")
 else
-  workspace_candidates=(workspace /root/yggdrasil_home/workspace /workspace*/yggdrasil_home/workspace)
+  workspace_candidates=("$REPO_ROOT/workspace")
 fi
 
 deployment_workspace=""

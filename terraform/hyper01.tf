@@ -1,6 +1,6 @@
 resource "libvirt_volume" "vol_1" {
   name   = "ubuntu-core-1"
-  source = "/root/yggdrasil_home/images/ubuntu-core/pc.img"
+  source = "${path.module}/../images/ubuntu-core/pc.img"
 
   provisioner "local-exec" {
     command = "truncate --size 300G /var/lib/libvirt/images/${self.name}"  # 300G volume
