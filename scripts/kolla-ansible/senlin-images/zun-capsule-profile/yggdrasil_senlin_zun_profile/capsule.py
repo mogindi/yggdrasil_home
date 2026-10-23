@@ -239,3 +239,41 @@ class CapsuleProfile(base.Profile):
         except Exception as error:
             LOG.warning("Could not check Zun capsule %s: %s", obj.physical_id, error)
             return False
+
+    def do_get_details(self, obj):
+        """Return Capsule details, including Neutron addresses, for
+        policies.
+        """
+        if not obj.physical_id:
+            return {}
+        session, base_url = self._session_and_base_url(obj)
+        try:
+            response = self._get_capsule(
+                session, self._capsule_url(base_url, obj.physical_id)
+            )
+            if response is None:
+                return {}
+            capsule = self._response_json(response)
+            if capsule.get("Error"):
+                reason = capsule["Error"].get("message") or "unknown error"
+                raise RuntimeError(
+                    f"Failed to get details for Capsule {obj.physical_id}: "
+                    f"{reason}"
+                )
+            return {
+                "id": (
+                    capsule.get("uuid")
+                    or capsule.get("id")
+                    or obj.physical_id
+                ),
+                "name": capsule.get("name") or obj.name,
+                "status": capsule.get("status"),
+                "addresses": capsule.get("addresses") or {},
+            }
+        except Exception as error:
+            LOG.warning(
+                "Could not get details for Zun capsule %s: %s",
+                obj.physical_id,
+                error,
+            )
+            return {"Error": {"message": str(error)}}
