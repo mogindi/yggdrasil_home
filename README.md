@@ -58,8 +58,8 @@ only has a normal root filesystem, use the storage-safe initializer:
 
 ```bash
 dev_infra/lxc-omarchy-initialize.sh
-source /root/yggdrasil_home/workspace/etc/kolla/admin-openrc.sh
-export OMARCHY_OPENSTACK_BIN=/root/yggdrasil_home/workspace/kolla-venv/bin/openstack
+source workspace/etc/kolla/admin-openrc.sh
+export OMARCHY_OPENSTACK_BIN=workspace/kolla-venv/bin/openstack
 make openstack-omarchy-image
 ```
 

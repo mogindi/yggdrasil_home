@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 GUEST_SCRIPT="$SCRIPT_DIR/omarchy-image-guest.sh"
 
 LXC_IMAGE_SOURCE="${OMARCHY_LXC_IMAGE_SOURCE:-${OMARCHY_LXC_IMAGE_ALIAS:-ubuntu:24.04}}"
@@ -133,9 +134,7 @@ prepare_openstack() {
   local candidate
   local -a workspace_candidates=(
     "${OMARCHY_OPENSTACK_WORKSPACE:-}"
-    workspace
-    /root/yggdrasil_home/workspace
-    /workspace4/yggdrasil_home/workspace
+    "$REPO_ROOT/workspace"
   )
   for candidate in "${workspace_candidates[@]}"; do
     [[ -n "$candidate" ]] || continue

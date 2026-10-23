@@ -13,7 +13,7 @@
         if [[ -n "$deployment_workspace" ]]; then
           workspace_candidates=("$deployment_workspace")
         else
-          workspace_candidates=(workspace /root/yggdrasil_home/workspace /workspace*/yggdrasil_home/workspace)
+          workspace_candidates=(workspace)
         fi
 
         deployment_workspace=""

@@ -16,6 +16,10 @@
 
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+YGGDRASIL_HOME_WORKSPACE="${YGGDRASIL_HOME_WORKSPACE:-$REPO_ROOT/workspace}"
+
 readonly OPENSEARCH_URL_DEFAULT="http://10.0.10.100:9200"
 readonly OPENSEARCH_SOFT_RETENTION_DAYS_DEFAULT=3
 readonly OPENSEARCH_HARD_RETENTION_DAYS_DEFAULT=7
@@ -53,7 +57,7 @@ Options:
 Environment overrides:
   OPENSEARCH_URL, OPENSEARCH_SOFT_RETENTION_DAYS,
   OPENSEARCH_HARD_RETENTION_DAYS, MARIADB_BINLOG_RETENTION_DAYS,
-  MARIADB_ROOT_PASSWORD
+  MARIADB_ROOT_PASSWORD, YGGDRASIL_HOME_WORKSPACE
 EOF
 }
 
@@ -218,8 +222,8 @@ fi
 
 if $REMOVE_FREEBSD_ARTIFACTS; then
   log "removing explicitly requested FreeBSD build artifacts"
-  for artifact in /root/yggdrasil_home/workspace/freebsd-RELEASE-*.raw \
-                  /root/yggdrasil_home/workspace/freebsd-RELEASE-*.qcow2; do
+  for artifact in "$YGGDRASIL_HOME_WORKSPACE"/freebsd-RELEASE-*.raw \
+                  "$YGGDRASIL_HOME_WORKSPACE"/freebsd-RELEASE-*.qcow2; do
     [[ -e "$artifact" ]] || continue
     if $DRY_RUN; then
       printf 'would remove %s\n' "$artifact"
