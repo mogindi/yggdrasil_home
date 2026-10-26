@@ -1,0 +1,126 @@
+---
+- name: Reconcile OpenSearch AIO replica settings
+  hosts: deployment_controller
+  gather_facts: false
+  vars:
+    opensearch_replicas_api: "http://{{ openstack_kolla_internal_vip_address | default('10.0.10.100') }}:9200"
+  tasks:
+    - name: Apply AIO OpenSearch replica policy when configured
+      when: opensearch_default_number_of_replicas is defined
+      block:
+        - name: Validate configured OpenSearch replica default
+          ansible.builtin.assert:
+            that:
+              - opensearch_default_number_of_replicas | int == 0
+            fail_msg: "The AIO OpenSearch replica reconciliation currently supports a zero-replica policy only."
+
+        - name: Read current OpenSearch cluster settings
+          ansible.builtin.uri:
+            url: "{{ opensearch_replicas_api }}/_cluster/settings?flat_settings=true"
+            method: GET
+            return_content: true
+            timeout: 30
+            status_code: 200
+          register: opensearch_cluster_settings_response
+          changed_when: false
+
+        - name: Clear a conflicting transient replica default
+          ansible.builtin.uri:
+            url: "{{ opensearch_replicas_api }}/_cluster/settings"
+            method: PUT
+            body_format: json
+            body:
+              transient:
+                cluster.default_number_of_replicas: null
+            timeout: 30
+            status_code: 200
+          changed_when: true
+          when:
+            - opensearch_cluster_settings_response.json.transient['cluster.default_number_of_replicas'] is defined
+            - >-
+              opensearch_cluster_settings_response.json.transient['cluster.default_number_of_replicas'] | int
+              != opensearch_default_number_of_replicas | int
+
+        - name: Persist the AIO replica default for new indices
+          ansible.builtin.uri:
+            url: "{{ opensearch_replicas_api }}/_cluster/settings"
+            method: PUT
+            body_format: json
+            body:
+              persistent:
+                cluster.default_number_of_replicas: "{{ opensearch_default_number_of_replicas }}"
+            timeout: 30
+            status_code: 200
+          changed_when: true
+          when: >-
+            opensearch_cluster_settings_response.json.persistent['cluster.default_number_of_replicas']
+            | default('__unset__') | string != opensearch_default_number_of_replicas | string
+
+        - name: Read the current payments index template
+          ansible.builtin.uri:
+            url: "{{ opensearch_replicas_api }}/_index_template/payments_template"
+            method: GET
+            return_content: true
+            timeout: 30
+            status_code:
+              - 200
+              - 404
+          register: opensearch_payments_template_response
+          changed_when: false
+
+        - name: Reconcile payments template replicas to the AIO default
+          ansible.builtin.uri:
+            url: "{{ opensearch_replicas_api }}/_index_template/payments_template"
+            method: PUT
+            body_format: json
+            body: >-
+              {{ opensearch_payments_template_response.json.index_templates[0].index_template
+                 | combine(
+                     {'template': {'settings': {'index': {
+                       'number_of_replicas': opensearch_default_number_of_replicas | string
+                     }}}},
+                     recursive=True
+                   ) }}
+            timeout: 30
+            status_code: 200
+            changed_when: true
+          when:
+            - opensearch_payments_template_response.status == 200
+            - >-
+              opensearch_payments_template_response.json.index_templates[0].index_template.template.settings.index.number_of_replicas
+              | default('0') | int != opensearch_default_number_of_replicas | int
+
+        - name: Read replica settings for all OpenSearch indices
+          ansible.builtin.uri:
+            url: "{{ opensearch_replicas_api }}/_all/_settings?expand_wildcards=all&include_defaults=true&filter_path=*.settings.index.number_of_replicas"
+            method: GET
+            return_content: true
+            timeout: 30
+            status_code: 200
+          register: opensearch_index_settings_response
+          changed_when: false
+
+        - name: Select indices that need replica settings updated
+          ansible.builtin.set_fact:
+            opensearch_indices_needing_replica_update: >-
+              {{ opensearch_index_settings_response.json | dict2items
+                 | selectattr('value.settings.index.number_of_replicas', 'defined')
+                 | rejectattr(
+                     'value.settings.index.number_of_replicas',
+                     'equalto',
+                     opensearch_default_number_of_replicas | string
+                   )
+                 | map(attribute='key')
+                 | list }}
+
+        - name: Set all existing OpenSearch indices to the AIO replica count
+          ansible.builtin.uri:
+            url: "{{ opensearch_replicas_api }}/_all/_settings?expand_wildcards=all"
+            method: PUT
+            body_format: json
+            body:
+              index.number_of_replicas: "{{ opensearch_default_number_of_replicas }}"
+            timeout: 60
+            status_code: 200
+            changed_when: true
+          when: opensearch_indices_needing_replica_update | length > 0

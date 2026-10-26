@@ -92,6 +92,11 @@ openstack_release: 2025.2
 kolla_globals:
   mariadb_innodb_log_file_size_mb: 1024
   mariadb_binlog_expire_logs_days: 1
+  freezer_elasticsearch_replicas: "0"
+# AIO keeps one copy of every OpenSearch shard. The post-deploy reconciliation
+# persists this default through the cluster settings API and updates existing
+# indices and templates; service-owned settings use this same value.
+opensearch_default_number_of_replicas: 0
 # Kolla merges this host-specific YAML into the OpenSearch configuration.
 # Keep the disk watermarks below the full-disk condition while retaining
 # OpenSearch's default read-only protection at the flood stage.

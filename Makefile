@@ -103,6 +103,9 @@ openstack-client-install:
 free-disk-space:
 	ansible-playbook ansible/free_disk_space.yml $(VAULT_ARGS) $(FREE_DISK_SPACE_ARGS) $(ARGS)
 
+openstack-opensearch-replicas:
+	ansible-playbook ansible/openstack_initialize/opensearch_replicas.yml $(VAULT_ARGS) $(ARGS)
+
 openstack-roles: kollaansible-postdeploy openstack-client-install
 	OPENSTACK_KOLLA_WORKSPACE="$(CURDIR)/workspace" \
 	OPENSTACK_ROLES="$(OPENSTACK_ROLES)" \
@@ -186,7 +189,7 @@ ceph-up: cephadm-deploy
 
 kollaansible-up: kollaansible-images kollaansible-prepare-full kollaansible-create-certs kollaansible-bootstrap kollaansible-prechecks kollaansible-deploy kollaansible-lma
 
-postdeploy-up: kollaansible-postdeploy openstack-client-install openstack-roles openstack-resources-init symlink-etc-kolla openstack-services
+postdeploy-up: kollaansible-postdeploy openstack-client-install openstack-roles openstack-resources-init symlink-etc-kolla openstack-services openstack-opensearch-replicas
 
 all-up: infra-up ceph-up kollaansible-up postdeploy-up
 
