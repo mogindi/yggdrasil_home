@@ -797,11 +797,40 @@ def run_inventory(
     return report
 
 
-def _report_errors(report: Mapping[str, Any]) -> list[str]:
+def _report_error_details(report: Mapping[str, Any]) -> list[tuple[str, str]]:
     errors = report.get("errors", [])
     if not isinstance(errors, list):
-        return ["inventory report errors field is not a list"]
-    return [str(error) for error in errors if error]
+        return [("inventory", "inventory report errors field is not a list")]
+    details: list[tuple[str, str]] = []
+    for issue in errors:
+        if not issue:
+            continue
+        if isinstance(issue, Mapping):
+            category = str(issue.get("category") or "inventory")
+            service = str(issue.get("service") or "unknown")
+            resource = str(issue.get("resource") or "unknown")
+            message = str(issue.get("error") or issue)
+            details.append((category, f"{service}/{resource}: {message}"))
+        else:
+            details.append(("inventory", str(issue)))
+    return details
+
+
+def _allowed_inventory_errors(
+    details: Sequence[tuple[str, str]],
+    *,
+    allow_inventory_errors: bool,
+    allow_service_api_errors: bool,
+) -> list[tuple[str, str]]:
+    if allow_inventory_errors:
+        return list(details)
+    if allow_service_api_errors:
+        return [issue for issue in details if issue[0] == "service_api"]
+    return []
+
+
+def _report_errors(details: Sequence[tuple[str, str]]) -> list[str]:
+    return [message for _category, message in details]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -840,6 +869,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow a report with inventory errors; unsupported resources still stop deletion.",
     )
     parser.add_argument(
+        "--allow-service-api-errors",
+        action="store_true",
+        help=(
+            "Treat failed OpenStack service API inventory calls as warnings; "
+            "other inventory errors still stop deletion."
+        ),
+    )
+    parser.add_argument(
         "--yes",
         action="store_true",
         help="Actually delete resources. Without this flag, print the ordered plan only.",
@@ -872,19 +909,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.inventory_script,
                 args.project,
                 openstack_bin=args.openstack_bin,
-                strict=not args.allow_inventory_errors,
+                strict=not (
+                    args.allow_inventory_errors or args.allow_service_api_errors
+                ),
                 interface=args.interface,
                 region=args.region,
             )
         else:
             report = load_report(args.report)
 
-        inventory_errors = _report_errors(report)
-        if inventory_errors and not args.allow_inventory_errors:
+        inventory_error_details = _report_error_details(report)
+        allowed_errors = _allowed_inventory_errors(
+            inventory_error_details,
+            allow_inventory_errors=args.allow_inventory_errors,
+            allow_service_api_errors=args.allow_service_api_errors,
+        )
+        for category, message in allowed_errors:
+            print(
+                f"WARNING: non-blocking {category} error: {message}",
+                file=sys.stderr,
+            )
+        blocking_errors = [
+            issue for issue in inventory_error_details if issue not in allowed_errors
+        ]
+        if blocking_errors:
             raise DeletePlanError(
                 "refusing to delete from an incomplete inventory; rerun the inventory "
                 "with --strict and resolve these errors: "
-                + "; ".join(inventory_errors)
+                + "; ".join(_report_errors(blocking_errors))
             )
 
         operations, issues = plan_deletions(report)
@@ -922,14 +974,31 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.inventory_script,
                 args.project,
                 openstack_bin=args.openstack_bin,
-                strict=not args.allow_inventory_errors,
+                strict=not (
+                    args.allow_inventory_errors or args.allow_service_api_errors
+                ),
                 interface=args.interface,
                 region=args.region,
             )
-            verify_errors = _report_errors(verified)
+            verify_error_details = _report_error_details(verified)
+            allowed_verify_errors = _allowed_inventory_errors(
+                verify_error_details,
+                allow_inventory_errors=args.allow_inventory_errors,
+                allow_service_api_errors=args.allow_service_api_errors,
+            )
+            for category, message in allowed_verify_errors:
+                print(
+                    f"WARNING: non-blocking {category} error during verification: {message}",
+                    file=sys.stderr,
+                )
+            blocking_verify_errors = [
+                issue
+                for issue in verify_error_details
+                if issue not in allowed_verify_errors
+            ]
             verify_operations, verify_issues = plan_deletions(verified)
-            if verify_errors or verify_issues or verify_operations:
-                details = verify_errors + verify_issues
+            if blocking_verify_errors or verify_issues or verify_operations:
+                details = _report_errors(blocking_verify_errors) + verify_issues
                 if verify_operations:
                     details.append(
                         "remaining resources: "

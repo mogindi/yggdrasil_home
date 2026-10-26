@@ -5,8 +5,12 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
+import stat
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -245,6 +249,170 @@ class PlanningTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+    def _run_project_cleanup(
+        self,
+        reports,
+        arguments,
+        *,
+        openstack_exit=0,
+    ):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary_path = Path(temporary_directory)
+            report_dir = temporary_path / "reports"
+            report_dir.mkdir()
+            for index, report in enumerate(reports):
+                (report_dir / f"{index}.json").write_text(
+                    json.dumps(report), encoding="utf-8"
+                )
+
+            inventory_script = temporary_path / "inventory.py"
+            inventory_script.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, pathlib, sys\n"
+                "counter = pathlib.Path(os.environ['MOCK_INVENTORY_COUNTER'])\n"
+                "try:\n"
+                "    index = int(counter.read_text(encoding='utf-8'))\n"
+                "except FileNotFoundError:\n"
+                "    index = 0\n"
+                "with open(os.environ['MOCK_INVENTORY_ARGS'], 'a', encoding='utf-8') as handle:\n"
+                "    handle.write(' '.join(sys.argv[1:]) + '\\n')\n"
+                "report = pathlib.Path(os.environ['MOCK_REPORT_DIR']) / f'{index}.json'\n"
+                "print(report.read_text(encoding='utf-8'))\n"
+                "counter.write_text(str(index + 1), encoding='utf-8')\n",
+                encoding="utf-8",
+            )
+            openstack_bin = temporary_path / "openstack"
+            openstack_bin.write_text(
+                "#!/usr/bin/env python3\n"
+                "import os, sys\n"
+                "with open(os.environ['MOCK_OPENSTACK_LOG'], 'a', encoding='utf-8') as handle:\n"
+                "    handle.write(' '.join(sys.argv[1:]) + '\\n')\n"
+                "raise SystemExit(int(os.environ['MOCK_OPENSTACK_EXIT']))\n",
+                encoding="utf-8",
+            )
+            openstack_bin.chmod(openstack_bin.stat().st_mode | stat.S_IXUSR)
+
+            inventory_args = temporary_path / "inventory-args.log"
+            openstack_log = temporary_path / "openstack.log"
+            environment = {
+                "MOCK_REPORT_DIR": str(report_dir),
+                "MOCK_INVENTORY_COUNTER": str(temporary_path / "inventory-count"),
+                "MOCK_INVENTORY_ARGS": str(inventory_args),
+                "MOCK_OPENSTACK_LOG": str(openstack_log),
+                "MOCK_OPENSTACK_EXIT": str(openstack_exit),
+            }
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, environment):
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    result = deleter.main(
+                        [
+                            "--project",
+                            "project-1",
+                            "--inventory-script",
+                            str(inventory_script),
+                            "--openstack-bin",
+                            str(openstack_bin),
+                            *arguments,
+                        ]
+                    )
+            return (
+                result,
+                stdout.getvalue(),
+                stderr.getvalue(),
+                openstack_log.read_text(encoding="utf-8")
+                if openstack_log.exists()
+                else "",
+                inventory_args.read_text(encoding="utf-8")
+                if inventory_args.exists()
+                else "",
+            )
+
+    @staticmethod
+    def _service_api_error():
+        return {
+            "service": "backup",
+            "resource": "backups",
+            "category": "service_api",
+            "error": "Freezer API returned 500",
+        }
+
+    def test_service_api_inventory_errors_are_warnings_during_delete_and_verify(self):
+        initial = report_with_resources(
+            {"compute": {"server": [{"id": "server-1"}]}}
+        )
+        initial["errors"] = [self._service_api_error()]
+        verified = report_with_resources({})
+        verified["errors"] = [self._service_api_error()]
+
+        result, stdout, stderr, commands, inventory_args = self._run_project_cleanup(
+            [initial, verified],
+            ["--allow-service-api-errors", "--yes", "--verify"],
+        )
+
+        self.assertEqual(result, 0, stderr)
+        self.assertIn("WARNING: non-blocking service_api error", stderr)
+        self.assertIn("WARNING: non-blocking service_api error during verification", stderr)
+        self.assertIn("Verified that no project resources remain.", stdout)
+        self.assertIn("server delete --wait server-1", commands)
+        self.assertEqual(len(inventory_args.splitlines()), 2)
+        self.assertNotIn("--strict", inventory_args)
+
+    def test_non_api_inventory_errors_still_block_delete(self):
+        report = report_with_resources(
+            {"compute": {"server": [{"id": "server-1"}]}}
+        )
+        report["errors"] = [
+            self._service_api_error(),
+            {
+                "service": "workflow",
+                "resource": "(client)",
+                "category": "inventory",
+                "error": "No supported SDK client",
+            },
+        ]
+
+        result, _stdout, stderr, commands, _inventory_args = self._run_project_cleanup(
+            [report], ["--allow-service-api-errors", "--yes"]
+        )
+
+        self.assertEqual(result, 2)
+        self.assertIn("WARNING: non-blocking service_api error", stderr)
+        self.assertIn("workflow/(client): No supported SDK client", stderr)
+        self.assertEqual(commands, "")
+
+    def test_service_api_inventory_errors_remain_blocking_by_default(self):
+        report = report_with_resources(
+            {"compute": {"server": [{"id": "server-1"}]}}
+        )
+        report["errors"] = [self._service_api_error()]
+
+        result, _stdout, stderr, commands, inventory_args = self._run_project_cleanup(
+            [report], ["--yes"]
+        )
+
+        self.assertEqual(result, 2)
+        self.assertIn("backup/backups: Freezer API returned 500", stderr)
+        self.assertEqual(commands, "")
+        self.assertIn("--strict", inventory_args)
+
+    def test_resource_delete_api_failure_remains_blocking(self):
+        report = report_with_resources(
+            {"compute": {"server": [{"id": "server-1"}]}}
+        )
+        report["errors"] = [self._service_api_error()]
+
+        result, _stdout, stderr, commands, inventory_args = self._run_project_cleanup(
+            [report, report],
+            ["--allow-service-api-errors", "--yes", "--verify"],
+            openstack_exit=1,
+        )
+
+        self.assertEqual(result, 3)
+        self.assertIn("ERROR: compute/server/server-1", stderr)
+        self.assertIn("server delete --wait server-1", commands)
+        self.assertEqual(len(inventory_args.splitlines()), 1)
+
     def test_missing_router_interface_is_treated_as_already_removed(self):
         self.assertTrue(
             deleter._missing_output(

@@ -45,6 +45,10 @@ class InventoryError(RuntimeError):
     """Base class for errors that should be shown without a traceback."""
 
 
+class ServiceAPIError(InventoryError):
+    """An OpenStack service API request failed during resource inventory."""
+
+
 class UnsupportedClientError(InventoryError):
     """Raised when an endpoint has no usable Python client."""
 
@@ -80,7 +84,12 @@ class ResourceSpec:
 
 
 def _provider_error(resource_type: str, message: Any) -> dict[str, str]:
-    return {"resource": resource_type, "error": _text(message)}
+    category = "service_api" if isinstance(message, ServiceAPIError) else "inventory"
+    return {
+        "resource": resource_type,
+        "category": category,
+        "error": _text(message),
+    }
 
 
 @contextlib.contextmanager
@@ -899,7 +908,7 @@ def _list_all(proxy: Any, resource_class: type, **kwargs: Any) -> list[Any]:
         return list(result) if result is not None else []
     except Exception as exc:
         name = _text(getattr(resource_class, "resource_key", "")) or resource_class.__name__
-        raise InventoryError(f"listing SDK resource {name!r} failed: {exc}") from exc
+        raise ServiceAPIError(f"listing SDK resource {name!r} failed: {exc}") from exc
 
 
 class BuiltinSDKProvider:
@@ -1406,7 +1415,7 @@ class LegacySDKProvider:
                 values = manager.list(**kwargs)
                 values = [] if values is None else list(values)
             except Exception as exc:
-                error = InventoryError(
+                error = ServiceAPIError(
                     f"listing legacy SDK resource {name!r} for service "
                     f"{self.endpoint.service_type!r} failed: {exc}"
                 )
@@ -1737,6 +1746,7 @@ def inventory(
                 {
                     "service": endpoint.service_type,
                     "resource": "(client)",
+                    "category": "inventory",
                     "error": (
                         f"{endpoint.service_type} ({endpoint.raw_service_type}, "
                         f"{endpoint.url}): {exc}"
@@ -1761,6 +1771,7 @@ def inventory(
                 {
                     "service": endpoint.service_type,
                     "resource": "(provider)",
+                    "category": "inventory",
                     "error": _text(exc),
                 }
             )
@@ -1779,6 +1790,7 @@ def inventory(
                 {
                     "service": endpoint.service_type,
                     "resource": issue["resource"],
+                    "category": issue.get("category", "inventory"),
                     "error": issue["error"],
                 }
             )

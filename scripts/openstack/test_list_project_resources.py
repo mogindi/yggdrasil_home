@@ -373,6 +373,12 @@ class ProviderTests(unittest.TestCase):
             "compute", "RegionOne", "nova", "compute", "compute", "public", "compute"
         )
         provider = inventory.BuiltinSDKProvider(endpoint, object(), Description())
+        result = provider.collect(
+            inventory.Project("project-1", "Project", {"id": "project-1"}),
+            strict=False,
+        )
+        self.assertEqual(result, {"widget": []})
+        self.assertEqual(provider.errors[0]["category"], "service_api")
         with self.assertRaisesRegex(inventory.InventoryError, "widget"):
             provider.collect(inventory.Project("project-1", "Project", {"id": "project-1"}))
 
@@ -485,6 +491,7 @@ class ProviderTests(unittest.TestCase):
 
         self.assertEqual(result["backups"][0]["id"], "backup-1")
         self.assertEqual(provider.errors[0]["resource"], "sessions")
+        self.assertEqual(provider.errors[0]["category"], "service_api")
         self.assertIn("Service Unavailable", provider.errors[0]["error"])
 
     def test_legacy_provider_ignores_an_unavailable_optional_collection(self) -> None:
@@ -600,6 +607,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(report["resources"]["one"]["resources"][0]["id"], "resource-1")
         self.assertEqual(report["errors"][0]["service"], "two")
         self.assertEqual(report["errors"][0]["resource"], "(client)")
+        self.assertEqual(report["errors"][0]["category"], "inventory")
 
     def test_render_table_shows_resource_errors(self) -> None:
         output = inventory.render_table(
