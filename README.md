@@ -555,6 +555,7 @@ Below is a complete catalog of Make targets in this repo.
 - `docker` — configures Docker.
 - `vpn` — configures VPN.
 - `provider-gateway-vip` — configures provider gateway VIP.
+- `rgpu-proxy-vip-failover-test` — briefly stops the RGPU VIP owner's Keepalived container, checks that the VIP and a live GPU SSH port move to a peer, then restores the owner. Requires a multi-node inventory and a ready RGPU VM.
 - `devices-configure` — configures host devices.
 - `checks` — runs validation checks.
 - `cephadm-deploy` — deploys Ceph via cephadm playbook.
@@ -768,6 +769,10 @@ make all-up ENV=aio
 
 # Prepare only infrastructure
 make infra-up ENV=aio
+
+# Check RGPU VIP forwarding after failover (multi-node inventory and live GPU required)
+make prepare-ansible ENV=hetzner-dual-server
+make rgpu-proxy-vip-failover-test RGPU_PROXY_VIP_FAILOVER_PROBE_PORT=22000
 
 # Run only Kolla deploy pipeline
 make kollaansible-up ENV=aio

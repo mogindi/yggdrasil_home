@@ -1,0 +1,236 @@
+---
+- name: Deploy the dedicated RGPU SSH proxy VIP
+  hosts: deployment_nodes
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  tags:
+    - yggdrasil_rgpu
+  vars:
+    yggdrasil_rgpu_proxy_vip_cidr: "{{ network_yggdrasil_rgpu_proxy_vip | default('') }}"
+    yggdrasil_rgpu_proxy_vip_address: "{{ yggdrasil_rgpu_proxy_vip_cidr | ansible.utils.ipv4('address') }}"
+    yggdrasil_rgpu_proxy_vip_interface_effective: "{{ network_yggdrasil_rgpu_proxy_vip_interface | default('') }}"
+    yggdrasil_rgpu_proxy_vip_router_id_effective: "{{ network_yggdrasil_rgpu_proxy_vip_router_id | default(0) | int }}"
+    yggdrasil_rgpu_proxy_vip_node_ip: "{{ network_openstack_mgmt_ip | ansible.utils.ipv4('address') }}"
+    yggdrasil_rgpu_root_effective: >-
+      {{ yggdrasil_internal_root ~ '/yggdrasil_rgpu'
+         if ansible_connection == 'local' and yggdrasil_internal_root is defined
+         else ansible_user_dir ~ '/yggdrasil_rgpu' }}
+    yggdrasil_rgpu_proxy_vip_config_fingerprint: >-
+      {{ [yggdrasil_rgpu_proxy_vip_cidr,
+          yggdrasil_rgpu_proxy_vip_interface_effective,
+          yggdrasil_rgpu_proxy_vip_router_id_effective,
+          yggdrasil_rgpu_proxy_vip_node_ip,
+          groups['deployment_nodes'] | map('extract', hostvars, 'network_openstack_mgmt_ip') | list,
+          keepalived_key[:8],
+          'config_directory_bind_rw_v4_clear_osixia_defaults'] | to_json | hash('sha256') }}
+    yggdrasil_rgpu_keepalived_config_dir: "{{ yggdrasil_rgpu_root_effective }}/keepalived"
+    yggdrasil_rgpu_keepalived_config_path: "{{ yggdrasil_rgpu_root_effective | default('yggdrasil_rgpu') }}/keepalived/keepalived.conf"
+  tasks:
+    - name: Validate RGPU proxy VIP inventory settings
+      ansible.builtin.assert:
+        that:
+          - yggdrasil_rgpu_proxy_vip_cidr is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}/([0-9]|[12][0-9]|3[0-2])$')
+          - yggdrasil_rgpu_proxy_vip_interface_effective | length > 0
+          - yggdrasil_rgpu_proxy_vip_router_id_effective | int >= 1
+          - yggdrasil_rgpu_proxy_vip_router_id_effective | int <= 255
+          - yggdrasil_rgpu_proxy_vip_router_id_effective | int != 51
+          - yggdrasil_rgpu_proxy_vip_address != openstack_kolla_internal_vip_address
+          - keepalived_key is defined
+          - keepalived_key | string | length >= 8
+          - groups['deployment_nodes'] | length >= 1
+        fail_msg: >-
+          Configure a unique IPv4 CIDR, interface, and VRRP ID for the RGPU proxy VIP;
+          its VRRP ID must differ from Kolla's 51.
+      no_log: true
+
+    - name: Verify the RGPU proxy VIP interface exists on each node
+      ansible.builtin.command:
+        argv:
+          - ip
+          - link
+          - show
+          - dev
+          - "{{ yggdrasil_rgpu_proxy_vip_interface_effective }}"
+      changed_when: false
+
+    - name: Enable IPv4 forwarding for RGPU DNAT traffic
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        sysctl_set: true
+        state: present
+        reload: true
+
+    - name: Install the ARP address-conflict probe
+      ansible.builtin.package:
+        name: "{{ 'iputils-arping' if ansible_os_family == 'Debian' else 'iputils' }}"
+        state: present
+
+    - name: Check for an existing RGPU proxy Keepalived container
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+          - -q
+          - --filter
+          - name=^/yggdrasil_rgpu_proxy_vip$
+      register: yggdrasil_rgpu_vip_container_ids
+      changed_when: false
+
+    - name: Check whether the RGPU VIP is already configured on this interface
+      ansible.builtin.shell: >-
+        ip -o -4 addr show dev {{ yggdrasil_rgpu_proxy_vip_interface_effective | quote }} |
+        awk '{split($4, address, "/"); if (address[1] == {{ yggdrasil_rgpu_proxy_vip_address | quote }}) print $4}'
+      args:
+        executable: /bin/bash
+      register: yggdrasil_rgpu_vip_interface_addresses
+      changed_when: false
+
+    - name: Fail if the VIP address is configured outside its managed Keepalived container
+      ansible.builtin.assert:
+        that:
+          - >-
+            yggdrasil_rgpu_vip_interface_addresses.stdout | trim | length == 0 or
+            yggdrasil_rgpu_vip_container_ids.stdout | trim | length > 0
+        fail_msg: >-
+          {{ yggdrasil_rgpu_proxy_vip_address }} is already assigned on
+          {{ inventory_hostname }} outside yggdrasil_rgpu_proxy_vip.
+      no_log: true
+
+    - name: Check whether a managed RGPU VIP owner already exists
+      ansible.builtin.shell: >-
+        if docker ps -q --filter 'name=^/yggdrasil_rgpu_proxy_vip$' | grep -q . &&
+           ip -o -4 addr show dev {{ yggdrasil_rgpu_proxy_vip_interface_effective | quote }} |
+           awk '{split($4, address, "/"); if (address[1] == {{ yggdrasil_rgpu_proxy_vip_address | quote }}) found=1} END {exit !found}'; then
+          echo managed-owner
+        fi
+      args:
+        executable: /bin/bash
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['deployment_nodes'] }}"
+      run_once: true
+      register: yggdrasil_rgpu_vip_managed_owners
+      changed_when: false
+
+    - name: Check the management VLAN for an unclaimed RGPU VIP address
+      ansible.builtin.command:
+        argv:
+          - arping
+          - -D
+          - -c
+          - "3"
+          - -w
+          - "4"
+          - -I
+          - "{{ yggdrasil_rgpu_proxy_vip_interface_effective }}"
+          - "{{ yggdrasil_rgpu_proxy_vip_address }}"
+      delegate_to: "{{ groups['deployment_nodes'][0] }}"
+      run_once: true
+      register: yggdrasil_rgpu_vip_conflict_check
+      changed_when: false
+      when: >-
+        yggdrasil_rgpu_vip_managed_owners.results
+        | selectattr('stdout', 'equalto', 'managed-owner') | list | length == 0
+
+    - name: Ensure the RGPU Keepalived configuration directory exists
+      ansible.builtin.file:
+        path: "{{ yggdrasil_rgpu_keepalived_config_path | dirname }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install the RGPU VIP Keepalived configuration
+      ansible.builtin.template:
+        src: templates/rgpu_proxy_keepalived.conf.j2
+        dest: "{{ yggdrasil_rgpu_keepalived_config_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+      no_log: true
+
+    - name: Read the deployed RGPU VIP Keepalived fingerprint
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ '{{' }}index .Config.Labels \"com.yggdrasil.rgpu-proxy-vip.fingerprint\"{{ '}}' }}"
+          - yggdrasil_rgpu_proxy_vip
+      register: yggdrasil_rgpu_vip_current_fingerprint
+      changed_when: false
+      failed_when: false
+
+    - name: Remove the RGPU VIP Keepalived container when its configuration changed
+      ansible.builtin.command:
+        argv:
+          - docker
+          - rm
+          - -f
+          - yggdrasil_rgpu_proxy_vip
+      when: yggdrasil_rgpu_vip_current_fingerprint.stdout | trim != yggdrasil_rgpu_proxy_vip_config_fingerprint
+      failed_when: false
+
+    - name: Run the RGPU VIP Keepalived container
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - -d
+          - --network
+          - host
+          - --cap-add=NET_ADMIN
+          - --cap-add=NET_BROADCAST
+          - --cap-add=NET_RAW
+          - --restart
+          - always
+          - --label
+          - "com.yggdrasil.rgpu-proxy-vip.fingerprint={{ yggdrasil_rgpu_proxy_vip_config_fingerprint }}"
+          - -e
+          - KEEPALIVED_NOTIFY=
+          - -e
+          - KEEPALIVED_UNICAST_PEERS=
+          - -e
+          - KEEPALIVED_VIRTUAL_IPS=
+          - -v
+          - "{{ yggdrasil_rgpu_keepalived_config_dir }}:/container/service/keepalived/assets"
+          - --name
+          - yggdrasil_rgpu_proxy_vip
+          - osixia/keepalived:2.0.20
+      when: yggdrasil_rgpu_vip_current_fingerprint.stdout | trim != yggdrasil_rgpu_proxy_vip_config_fingerprint
+
+    - name: Wait for the RGPU forwarding health endpoint on the VIP
+      ansible.builtin.uri:
+        url: "http://{{ yggdrasil_rgpu_proxy_vip_address }}:9995/healthz"
+        status_code: 200
+        return_content: true
+      register: yggdrasil_rgpu_vip_health
+      retries: 30
+      delay: 2
+      until:
+        - yggdrasil_rgpu_vip_health.status | default(0) == 200
+        - yggdrasil_rgpu_vip_health.json.status | default('') == 'ok'
+      changed_when: false
+
+    - name: Read Keepalived VIP ownership from every deployment node
+      ansible.builtin.include_tasks: tasks/rgpu_proxy_vip_owner_check.yml
+
+    - name: Fail unless exactly one deployment node owns the RGPU proxy VIP
+      ansible.builtin.assert:
+        that:
+          - yggdrasil_rgpu_vip_owner_count | int == 1
+        fail_msg: >-
+          RGPU proxy VIP {{ yggdrasil_rgpu_proxy_vip_address }} is assigned to
+          {{ yggdrasil_rgpu_vip_owner_count }} nodes; expected exactly one.
+
+    - name: Verify the RGPU proxy VIP responds on its management address
+      ansible.builtin.command:
+        argv:
+          - ping
+          - -c
+          - "2"
+          - -W
+          - "2"
+          - "{{ yggdrasil_rgpu_proxy_vip_address }}"
+      changed_when: false

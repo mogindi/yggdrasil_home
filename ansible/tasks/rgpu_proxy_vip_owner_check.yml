@@ -1,0 +1,21 @@
+---
+- name: Read RGPU proxy VIP assignment on every deployment node
+  ansible.builtin.shell: >-
+    ip -o -4 addr show dev {{ yggdrasil_rgpu_proxy_vip_interface_effective | quote }} |
+    awk -v expected={{ yggdrasil_rgpu_proxy_vip_address | quote }}
+    '{split($4, address, "/"); if (address[1] == expected) print $4}'
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ vip_deployment_node }}"
+  loop: "{{ groups['deployment_nodes'] }}"
+  loop_control:
+    loop_var: vip_deployment_node
+  register: yggdrasil_rgpu_vip_node_addresses
+  changed_when: false
+
+- name: Count nodes with the RGPU proxy VIP
+  ansible.builtin.set_fact:
+    yggdrasil_rgpu_vip_owner_count: >-
+      {{ yggdrasil_rgpu_vip_node_addresses.results
+         | map(attribute='stdout') | map('trim') | reject('equalto', '')
+         | list | length }}

@@ -1,0 +1,146 @@
+---
+- name: Verify RGPU SSH forwarding after a live VIP failover
+  hosts: deployment_nodes
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    yggdrasil_rgpu_proxy_vip_address: >-
+      {{ network_yggdrasil_rgpu_proxy_vip | ansible.utils.ipv4('address') }}
+    yggdrasil_rgpu_proxy_vip_interface_effective: >-
+      {{ network_yggdrasil_rgpu_proxy_vip_interface }}
+  tasks:
+    - name: Validate that this inventory can fail over and has a live RGPU port to probe
+      ansible.builtin.assert:
+        that:
+          - groups['deployment_nodes'] | length >= 2
+          - network_yggdrasil_rgpu_proxy_vip is defined
+          - network_yggdrasil_rgpu_proxy_vip_interface is defined
+          - yggdrasil_rgpu_proxy_vip_failover_probe_port is defined
+          - yggdrasil_rgpu_proxy_vip_failover_probe_port | int >= 22000
+          - yggdrasil_rgpu_proxy_vip_failover_probe_port | int <= 22999
+        fail_msg: >-
+          Use a multi-node inventory and set
+          yggdrasil_rgpu_proxy_vip_failover_probe_port to the reserved SSH port
+          of a currently ready RGPU VM resource.
+      run_once: true
+
+    - name: Read RGPU VIP ownership from every deployment node
+      ansible.builtin.include_tasks: tasks/rgpu_proxy_vip_owner_check.yml
+      run_once: true
+
+    - name: Identify the current RGPU VIP owner
+      ansible.builtin.set_fact:
+        yggdrasil_rgpu_vip_original_owner: >-
+          {{ (yggdrasil_rgpu_vip_node_addresses.results
+              | selectattr('stdout', 'ne', '')
+              | map(attribute='vip_deployment_node') | list | first) | default('') }}
+      run_once: true
+
+    - name: Require exactly one current RGPU VIP owner
+      ansible.builtin.assert:
+        that:
+          - yggdrasil_rgpu_vip_original_owner | length > 0
+          - yggdrasil_rgpu_vip_owner_count | int == 1
+        fail_msg: "The RGPU proxy VIP must be assigned to exactly one deployment node before failover testing."
+      run_once: true
+
+    - name: Stop the current Keepalived owner, verify failover, and restore it
+      block:
+        - name: Relinquish the RGPU proxy VIP from its current owner
+          ansible.builtin.command:
+            argv:
+              - docker
+              - stop
+              - yggdrasil_rgpu_proxy_vip
+          delegate_to: "{{ yggdrasil_rgpu_vip_original_owner }}"
+          register: yggdrasil_rgpu_keepalived_stop
+
+        - name: Wait for the RGPU forwarder health endpoint through the moved VIP
+          ansible.builtin.uri:
+            url: "http://{{ network_yggdrasil_rgpu_proxy_vip | ansible.utils.ipv4('address') }}:9995/healthz"
+            status_code: 200
+            return_content: true
+          register: yggdrasil_rgpu_vip_failover_health
+          retries: 30
+          delay: 2
+          until:
+            - yggdrasil_rgpu_vip_failover_health.status | default(0) == 200
+            - yggdrasil_rgpu_vip_failover_health.json.status | default('') == 'ok'
+          run_once: true
+
+        - name: Read RGPU VIP ownership after failover
+          ansible.builtin.include_tasks: tasks/rgpu_proxy_vip_owner_check.yml
+          run_once: true
+
+        - name: Confirm the VIP moved to another healthy deployment node
+          ansible.builtin.assert:
+            that:
+              - yggdrasil_rgpu_vip_owner_count | int == 1
+              - yggdrasil_rgpu_vip_node_addresses.results
+                | selectattr('vip_deployment_node', 'equalto', yggdrasil_rgpu_vip_original_owner)
+                | map(attribute='stdout') | first | trim | length == 0
+              - yggdrasil_rgpu_vip_failover_health.json.node_id
+                == (hostvars[yggdrasil_rgpu_vip_node_addresses.results
+                    | selectattr('stdout', 'ne', '')
+                    | map(attribute='vip_deployment_node') | first].network_openstack_mgmt_ip
+                   | ansible.utils.ipv4('address'))
+            fail_msg: "Keepalived did not move the VIP to exactly one healthy peer."
+          run_once: true
+
+        - name: Verify the live GPU SSH port forwards after failover
+          ansible.builtin.wait_for:
+            host: "{{ network_yggdrasil_rgpu_proxy_vip | ansible.utils.ipv4('address') }}"
+            port: "{{ yggdrasil_rgpu_proxy_vip_failover_probe_port | int }}"
+            state: started
+            timeout: 60
+          delegate_to: "{{ yggdrasil_rgpu_vip_original_owner }}"
+          run_once: true
+
+      always:
+        - name: Restart the original RGPU Keepalived owner
+          ansible.builtin.command:
+            argv:
+              - docker
+              - start
+              - yggdrasil_rgpu_proxy_vip
+          delegate_to: "{{ yggdrasil_rgpu_vip_original_owner }}"
+          register: yggdrasil_rgpu_keepalived_start
+          failed_when: false
+          when: yggdrasil_rgpu_vip_original_owner | default('') | length > 0
+          run_once: true
+
+    - name: Wait for the RGPU proxy VIP health after restoring the owner
+      ansible.builtin.uri:
+        url: "http://{{ network_yggdrasil_rgpu_proxy_vip | ansible.utils.ipv4('address') }}:9995/healthz"
+        status_code: 200
+        return_content: true
+      register: yggdrasil_rgpu_vip_restored_health
+      retries: 30
+      delay: 2
+      until:
+        - yggdrasil_rgpu_vip_restored_health.status | default(0) == 200
+        - yggdrasil_rgpu_vip_restored_health.json.status | default('') == 'ok'
+      run_once: true
+
+    - name: Read RGPU VIP ownership after restoring the owner
+      ansible.builtin.include_tasks: tasks/rgpu_proxy_vip_owner_check.yml
+      run_once: true
+
+    - name: Confirm one deployment node owns the restored RGPU VIP
+      ansible.builtin.assert:
+        that:
+          - yggdrasil_rgpu_vip_owner_count | int == 1
+        fail_msg: "Expected exactly one RGPU proxy VIP owner after restoring Keepalived."
+      run_once: true
+
+    - name: Probe the forwarded SSH port through the restored VIP
+      ansible.builtin.wait_for:
+        host: "{{ network_yggdrasil_rgpu_proxy_vip | ansible.utils.ipv4('address') }}"
+        port: "{{ yggdrasil_rgpu_proxy_vip_failover_probe_port | int }}"
+        state: started
+        timeout: 60
+      delegate_to: >-
+        {{ (groups['deployment_nodes']
+            | reject('equalto', yggdrasil_rgpu_vip_original_owner)
+            | list | first) }}
+      run_once: true

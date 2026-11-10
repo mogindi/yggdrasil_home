@@ -1,0 +1,39 @@
+global_defs {
+  router_id YGGDRASIL_RGPU_PROXY_{{ inventory_hostname | regex_replace('[^A-Za-z0-9_]', '_') }}
+}
+
+vrrp_script check_rgpu_forwarder {
+  script "/usr/bin/curl -fsS http://127.0.0.1:9995/healthz"
+  interval 2
+  timeout 2
+  fall 2
+  rise 2
+  weight 0
+}
+
+vrrp_instance VI_RGPU_PROXY {
+  state BACKUP
+  interface {{ network_yggdrasil_rgpu_proxy_vip_interface }}
+  virtual_router_id {{ network_yggdrasil_rgpu_proxy_vip_router_id }}
+  priority 150
+  advert_int 1
+  authentication {
+    auth_type PASS
+    auth_pass {{ keepalived_key | hash('sha256') | regex_replace('^(.{8}).*$', '\\1') }}
+  }
+{% set peers = groups['deployment_nodes'] | map('extract', hostvars) | selectattr('inventory_hostname', 'ne', inventory_hostname) | map(attribute='network_openstack_mgmt_ip') | map('ansible.utils.ipv4', 'address') | list %}
+{% if peers | length > 0 %}
+  unicast_src_ip {{ network_openstack_mgmt_ip | ansible.utils.ipv4('address') }}
+  unicast_peer {
+{% for peer in peers %}
+    {{ peer }}
+{% endfor %}
+  }
+{% endif %}
+  virtual_ipaddress {
+    {{ network_yggdrasil_rgpu_proxy_vip }} dev {{ network_yggdrasil_rgpu_proxy_vip_interface }}
+  }
+  track_script {
+    check_rgpu_forwarder
+  }
+}

@@ -45,6 +45,16 @@ vpn:
 provider-gateway-vip: 
 	ansible-playbook ansible/provider_gateway_vip.yml $(VAULT_ARGS) $(ARGS)
 
+# Requires a ready RGPU VM port and a multi-node deployment inventory. The
+# playbook briefly stops the current VIP owner's Keepalived container to prove
+# forwarding survives the VIP moving to a peer, then restarts the owner.
+RGPU_PROXY_VIP_FAILOVER_PROBE_PORT ?=
+.PHONY: rgpu-proxy-vip-failover-test
+rgpu-proxy-vip-failover-test:
+	@test -n "$(RGPU_PROXY_VIP_FAILOVER_PROBE_PORT)" || (echo "Set RGPU_PROXY_VIP_FAILOVER_PROBE_PORT to a ready VM's reserved port (22000-22999)" >&2; exit 2)
+	ansible-playbook ansible/test_rgpu_proxy_vip_failover.yml $(VAULT_ARGS) \
+		-e yggdrasil_rgpu_proxy_vip_failover_probe_port=$(RGPU_PROXY_VIP_FAILOVER_PROBE_PORT) $(ARGS)
+
 devices-configure:
 	ansible-playbook ansible/devices.yml $(VAULT_ARGS) $(ARGS)
 
