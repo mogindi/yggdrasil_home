@@ -1,6 +1,14 @@
 # Data workspace stacks may be managed by editors; destructive lifecycle is
 # reserved for Data administrators.
 "stacks:create": "role:data_editor or role:data_admin"
-"stacks:show": "role:data_reader or role:data_editor or role:data_admin"
+"stacks:show": "role:data_reader or role:data_editor or role:data_admin or (role:rgpu_heat_reader and project_id:%(project_id)s)"
 "stacks:list": "role:data_reader or role:data_editor or role:data_admin"
 "stacks:delete": "role:data_admin"
+
+# Heat binds each request to the project ID in the URL before policy checks.
+# The inherited RGPU Heat role therefore uses a project-scoped token and only
+# receives stack lookup/show, template, and resource reads in that project;
+# stack listing and all mutations remain unavailable to it.
+"stacks:lookup": "role:rgpu_heat_reader and project_id:%(project_id)s"
+"stacks:template": "role:rgpu_heat_reader and project_id:%(project_id)s"
+"resource:index": "role:rgpu_heat_reader and project_id:%(project_id)s"
