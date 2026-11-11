@@ -2,3 +2,12 @@
 # members to create their own keypairs while keeping readers read-only.
 "os_compute_api:os-keypairs:create": "rule:context_is_admin or (role:member and user_id:%(user_id)s)"
 "os_compute_api:os-keypairs:delete": "rule:context_is_admin or (role:member and user_id:%(user_id)s)"
+
+# RGPU uses its dedicated system-scoped role to look up one server by its ID,
+# then verifies its source address and Heat ownership before accepting actions.
+# The RGPU client caps Nova's API microversion at 2.74 so it never requests
+# host_status. Do not grant this reader server list, host details, or mutations.
+"os_compute_api:servers:show": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"
+# Nova checks flavor extra specs while rendering a server show response. Keep
+# the same exact-ID system reader permission for that read-only sub-policy.
+"os_compute_api:servers:show:flavor-extra-specs": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"

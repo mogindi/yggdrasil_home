@@ -328,6 +328,12 @@ cat >  etc/kolla/config/nova.conf <<EOF
 [DEFAULT]
 cpu_allocation_ratio = 16.0
 ram_allocation_ratio = 5.0
+
+# A dedicated system-scoped RGPU role is allowed by explicit API rules only.
+# Keep oslo.policy's check strings enabled while allowing these narrow cross-
+# scope reads; the RGPU role is not used by other Nova policies.
+[oslo_policy]
+enforce_scope = false
 EOF
 config_dir=etc/kolla/config/nova
 mkdir -p $config_dir
@@ -363,13 +369,21 @@ CINDER_POLICY_SOURCE="$OPENSTACK_CINDER_POLICY_FILE"
 cp "$CINDER_POLICY_SOURCE" "$config_dir/policy.yaml"
 
 # Data control-plane APIs use the same project-scoped Data role tiers.
-for service in mistral barbican heat; do
+for service in mistral barbican; do
   policy_source="$SCRIPT_DIR/policies/$service/policy.yaml"
   if [[ -f "$policy_source" ]]; then
     mkdir -p "etc/kolla/config/$service"
     cp "$policy_source" "etc/kolla/config/$service/policy.yaml"
   fi
 done
+
+# Heat's public API requires project-scoped tokens. The inherited project role
+# receives only stack, template, and resource read permissions in policy.yaml;
+# retain Heat's normal scope enforcement.
+config_dir=etc/kolla/config/heat
+mkdir -p "$config_dir"
+HEAT_POLICY_SOURCE="${OPENSTACK_HEAT_POLICY_FILE:-$SCRIPT_DIR/policies/heat/policy.yaml}"
+cp "$HEAT_POLICY_SOURCE" "$config_dir/policy.yaml"
 
 # skyline
 mkdir -p etc/kolla/config/skyline/
