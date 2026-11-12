@@ -3,11 +3,15 @@
 "os_compute_api:os-keypairs:create": "rule:context_is_admin or (role:member and user_id:%(user_id)s)"
 "os_compute_api:os-keypairs:delete": "rule:context_is_admin or (role:member and user_id:%(user_id)s)"
 
-# RGPU uses its dedicated system-scoped role to look up one server by its ID,
-# then verifies its source address and Heat ownership before accepting actions.
-# The RGPU client caps Nova's API microversion at 2.74 so it never requests
-# host_status. Do not grant this reader server list, host details, or mutations.
-"os_compute_api:servers:show": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"
-# Nova checks flavor extra specs while rendering a server show response. Keep
-# the same exact-ID system reader permission for that read-only sub-policy.
+# RGPU uses the all-project detail API with an exact UUID filter, then verifies
+# the VM's source address and Heat ownership before accepting actions. Nova's
+# detail policies are project-scoped by default; the dedicated system role is
+# allowed here while enforce_scope=false remains enabled. RGPU caps Nova's API
+# microversion at 2.74 and does not request host details.
+"os_compute_api:servers:detail": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"
+"os_compute_api:servers:detail:get_all_tenants": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"
+"os_compute_api:servers:allow_all_filters": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"
+# Nova checks flavor extra specs while rendering server detail responses.
+# Keep only the response sub-policy RGPU needs; do not allow server show/list,
+# host-status details, summary listing, or server mutations.
 "os_compute_api:servers:show:flavor-extra-specs": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"
