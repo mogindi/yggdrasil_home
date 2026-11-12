@@ -6,23 +6,39 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class RgpuAuthorizationPolicyTests(unittest.TestCase):
-    def test_nova_allows_the_rgpu_role_to_show_exact_server_ids_only(self):
+    def test_nova_allows_rgpu_all_project_details_with_filters_only(self):
         policy = (ROOT / "scripts/kolla-ansible/policies/nova/policy.yaml").read_text()
 
-        self.assertIn(
-            '"os_compute_api:servers:show": "rule:project_reader_or_admin or '
-            '(role:rgpu_reader and system_scope:all)"',
-            policy,
-        )
-        self.assertIn(
-            '"os_compute_api:servers:show:flavor-extra-specs": '
-            '"rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"',
-            policy,
-        )
-        self.assertNotIn('"os_compute_api:servers:index"', policy)
-        self.assertNotIn('"os_compute_api:servers:detail"', policy)
-        self.assertNotIn('"os_compute_api:servers:show:host_status"', policy)
-        self.assertNotIn('"os_compute_api:servers:update"', policy)
+        for rule in (
+            "detail",
+            "detail:get_all_tenants",
+            "allow_all_filters",
+            "show:flavor-extra-specs",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(
+                    f'"os_compute_api:servers:{rule}": "rule:project_reader_or_admin or '
+                    '(role:rgpu_reader and system_scope:all)"',
+                    policy,
+                )
+
+        # The custom system role cannot use summary listing, single-server
+        # show, hypervisor details, or server mutations.
+        for forbidden_rule in (
+            "index",
+            "show\":",
+            "show:host_status",
+            "detail:host_status",
+            "create",
+            "update",
+            "delete",
+            "reboot",
+            "resize",
+        ):
+            with self.subTest(forbidden_rule=forbidden_rule):
+                self.assertNotIn(
+                    f'"os_compute_api:servers:{forbidden_rule}', policy
+                )
 
     def test_heat_allows_only_stack_template_and_resource_reads(self):
         policy = (ROOT / "scripts/kolla-ansible/policies/heat/policy.yaml").read_text()
