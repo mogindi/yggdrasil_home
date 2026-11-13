@@ -53,9 +53,13 @@ class RgpuAuthorizationPolicyTests(unittest.TestCase):
             policy,
         )
         self.assertIn(
-            '"resource:index": "role:rgpu_heat_reader and project_id:%(project_id)s"',
+            '"resource:index": "(role:reader and project_id:%(project_id)s) or '
+            '(role:rgpu_heat_reader and project_id:%(project_id)s)"',
             policy,
         )
+        self.assertNotIn('"resource:index": "role:data_reader', policy)
+        self.assertNotIn('"resource:index": "role:data_editor', policy)
+        self.assertNotIn('"resource:index": "role:data_admin', policy)
         self.assertIn(
             '(role:rgpu_heat_reader and project_id:%(project_id)s)',
             policy,

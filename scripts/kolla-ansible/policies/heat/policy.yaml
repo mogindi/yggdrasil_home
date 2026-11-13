@@ -11,4 +11,6 @@
 # stack listing and all mutations remain unavailable to it.
 "stacks:lookup": "role:rgpu_heat_reader and project_id:%(project_id)s"
 "stacks:template": "role:rgpu_heat_reader and project_id:%(project_id)s"
-"resource:index": "role:rgpu_heat_reader and project_id:%(project_id)s"
+# Standard readers can inspect resources in their scoped project; retain the
+# separate project-scoped grant used by RGPU ownership verification.
+"resource:index": "(role:reader and project_id:%(project_id)s) or (role:rgpu_heat_reader and project_id:%(project_id)s)"
