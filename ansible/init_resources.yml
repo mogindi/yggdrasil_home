@@ -36,4 +36,9 @@
 
         ./kolla-ansible/tools/init-runonce
 
+        # Remote GPU flavors use m1.small sizing; RGPU provisions the GPU.
+        cd -
+        bash scripts/create_rgpu_flavors.sh
+        cd workspace
+
         openstack router set --external-gateway {{ openstack_public_network.name }} demo-router
