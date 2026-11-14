@@ -24,6 +24,72 @@
     - cluster
     - opensearch
 
+- name: Read OpenSearch data-node disk allocation before index recovery
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/_cat/allocation?format=json&h=node,disk.percent,disk.avail"
+    method: GET
+    return_content: true
+    timeout: 30
+    status_code: 200
+  register: free_disk_space_opensearch_allocation
+  changed_when: false
+  failed_when: false
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Calculate the highest OpenSearch data-node disk percentage
+  ansible.builtin.set_fact:
+    free_disk_space_opensearch_current_max_disk_percent: >-
+      {{ (free_disk_space_opensearch_allocation.content | default('[]') | from_json
+          | map('dict2items')
+          | map('selectattr', 'key', 'equalto', 'disk.percent')
+          | map('first')
+          | map(attribute='value') | map('int') | list | max)
+         if free_disk_space_opensearch_allocation.status | default(0) == 200
+            and (free_disk_space_opensearch_allocation.content | default('[]') | from_json | length > 0)
+         else 100 }}
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Read OpenSearch cluster-wide create-index block
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/_cluster/settings?include_defaults=false"
+    method: GET
+    return_content: true
+    timeout: 30
+    status_code: 200
+  register: free_disk_space_opensearch_cluster_settings
+  changed_when: false
+  failed_when: false
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
+- name: Report OpenSearch recovery prerequisites
+  ansible.builtin.debug:
+    msg:
+      - "highest data-node disk usage={{ free_disk_space_opensearch_current_max_disk_percent | default('unknown') }}%"
+      - "clear all index flood-stage blocks={{ free_disk_space_opensearch_clear_read_only_all_indices | bool }}"
+      - "clear cluster create-index block={{ free_disk_space_opensearch_clear_create_index_block | bool }}"
+      - "cluster.blocks.create_index={{ (free_disk_space_opensearch_cluster_settings.json | default({})).get('persistent', {}).get('cluster', {}).get('blocks', {}).get('create_index', 'unset') }}"
+  when:
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+  tags:
+    - cluster
+    - opensearch
+
 - name: Clear read-only blocks only from flog indices
   ansible.builtin.uri:
     url: >-
@@ -41,6 +107,50 @@
     - free_disk_space_apply | bool
     - free_disk_space_opensearch_cleanup | bool
     - free_disk_space_opensearch_health.status | default(0) == 200
+    - free_disk_space_opensearch_current_max_disk_percent | default(100) | int < free_disk_space_opensearch_max_disk_percent | int
+  tags:
+    - cluster
+    - opensearch
+
+- name: Clear flood-stage read-only blocks from all indices after disk recovery
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/_all/_settings?expand_wildcards=all"
+    method: PUT
+    body_format: json
+    body:
+      index.blocks.read_only_allow_delete: null
+    timeout: 60
+    status_code:
+      - 200
+      - 404
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_clear_read_only_all_indices | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+    - free_disk_space_opensearch_current_max_disk_percent | default(100) | int < free_disk_space_opensearch_max_disk_percent | int
+  tags:
+    - cluster
+    - opensearch
+
+- name: Clear the persistent OpenSearch create-index block after disk recovery
+  ansible.builtin.uri:
+    url: "{{ free_disk_space_opensearch_url }}/_cluster/settings"
+    method: PUT
+    body_format: json
+    body:
+      persistent:
+        cluster.blocks.create_index: null
+      transient:
+        cluster.blocks.create_index: null
+    timeout: 30
+    status_code: 200
+  when:
+    - free_disk_space_apply | bool
+    - free_disk_space_opensearch_cleanup | bool
+    - free_disk_space_opensearch_clear_create_index_block | bool
+    - free_disk_space_opensearch_health.status | default(0) == 200
+    - free_disk_space_opensearch_current_max_disk_percent | default(100) | int < free_disk_space_opensearch_max_disk_percent | int
   tags:
     - cluster
     - opensearch

@@ -488,6 +488,18 @@ extra variables:
 make free-disk-space ENV=my-private-cloud FREE_DISK_SPACE_ARGS=''
 ```
 
+After removing enough data to bring every OpenSearch data node below
+`free_disk_space_opensearch_max_disk_percent` (90% by default), recover
+flood-stage blocks explicitly with:
+
+```bash
+make free-disk-space ENV=my-private-cloud FREE_DISK_SPACE_ARGS='-e free_disk_space_apply=true -e free_disk_space_confirm=true -e free_disk_space_opensearch_clear_read_only_all_indices=true -e free_disk_space_opensearch_clear_create_index_block=true'
+```
+
+The playbook reports the node disk threshold and cluster create-index setting
+before it acts. The all-index and persistent cluster-setting changes stay
+disabled unless their switches are supplied.
+
 The following higher-impact operations remain separate opt-ins:
 
 - `free_disk_space_docker_volume_prune=true` prunes anonymous volumes;

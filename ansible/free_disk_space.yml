@@ -61,6 +61,8 @@
           - not (free_disk_space_aggressive | bool) or (free_disk_space_apply | bool)
           - free_disk_space_opensearch_soft_retention_days | int >= 0
           - free_disk_space_opensearch_hard_retention_days | int >= free_disk_space_opensearch_soft_retention_days | int
+          - free_disk_space_opensearch_max_disk_percent | int > 0
+          - free_disk_space_opensearch_max_disk_percent | int < 100
           - free_disk_space_mariadb_binlog_retention_days | int >= 1
         fail_msg: >-
           Refusing cleanup: use a non-empty deployment_nodes group and pass

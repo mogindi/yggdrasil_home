@@ -41,6 +41,12 @@ free_disk_space_opensearch_url: "http://{{ openstack_kolla_internal_vip_address 
 free_disk_space_opensearch_soft_retention_days: 1
 free_disk_space_opensearch_hard_retention_days: 1
 free_disk_space_opensearch_clear_read_only_indices: "flog-*"
+# Flood-stage recovery is opt-in. Clear index blocks only after every data node
+# is below this disk threshold, and clear the cluster-wide create-index block
+# only through its separate explicit switch.
+free_disk_space_opensearch_max_disk_percent: 90
+free_disk_space_opensearch_clear_read_only_all_indices: false
+free_disk_space_opensearch_clear_create_index_block: false
 
 # Fluentd buffers are local to each node.  Discarding them intentionally loses
 # queued logs and therefore remains a separate opt-in.
