@@ -15,3 +15,6 @@
 # Keep only the response sub-policy RGPU needs; do not allow server show/list,
 # host-status details, summary listing, or server mutations.
 "os_compute_api:servers:show:flavor-extra-specs": "rule:project_reader_or_admin or (role:rgpu_reader and system_scope:all)"
+# Stack-delete recovery uses a separate project-scoped identity. It can only
+# force-delete the VM in the token's project after RGPU verifies Heat ownership.
+"os_compute_api:os-deferred-delete:force": "rule:admin_api or (role:rgpu_recovery and project_id:%(project_id)s)"
