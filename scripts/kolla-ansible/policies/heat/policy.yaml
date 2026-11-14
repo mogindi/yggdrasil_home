@@ -3,12 +3,13 @@
 "stacks:create": "role:data_editor or role:data_admin"
 "stacks:show": "role:data_reader or role:data_editor or role:data_admin or (role:rgpu_heat_reader and project_id:%(project_id)s)"
 "stacks:list": "role:data_reader or role:data_editor or role:data_admin"
-"stacks:delete": "role:data_admin"
+"stacks:delete": "role:data_admin or (role:rgpu_recovery and project_id:%(project_id)s)"
 
 # Heat binds each request to the project ID in the URL before policy checks.
 # The inherited RGPU Heat role therefore uses a project-scoped token and only
-# receives stack lookup/show, template, and resource reads in that project;
-# stack listing and all mutations remain unavailable to it.
+# receives stack lookup/show, template, and resource reads in that project.
+# A separate inherited RGPU recovery role may delete only stacks in its own
+# project when recovering an already verified remote-model deletion.
 "stacks:lookup": "role:rgpu_heat_reader and project_id:%(project_id)s"
 "stacks:template": "role:rgpu_heat_reader and project_id:%(project_id)s"
 # Standard readers can inspect resources in their scoped project; retain the

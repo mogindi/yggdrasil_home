@@ -40,6 +40,12 @@ class RgpuAuthorizationPolicyTests(unittest.TestCase):
                     f'"os_compute_api:servers:{forbidden_rule}', policy
                 )
 
+        self.assertIn(
+            '"os_compute_api:os-deferred-delete:force": "rule:admin_api or '
+            '(role:rgpu_recovery and project_id:%(project_id)s)"',
+            policy,
+        )
+
     def test_heat_allows_only_stack_template_and_resource_reads(self):
         policy = (ROOT / "scripts/kolla-ansible/policies/heat/policy.yaml").read_text()
 
@@ -66,6 +72,11 @@ class RgpuAuthorizationPolicyTests(unittest.TestCase):
         )
         self.assertNotIn('"stacks:list": "role:rgpu_heat_reader', policy)
         self.assertNotIn('"stacks:delete": "role:rgpu_heat_reader', policy)
+        self.assertIn(
+            '"stacks:delete": "role:data_admin or '
+            '(role:rgpu_recovery and project_id:%(project_id)s)"',
+            policy,
+        )
         self.assertNotIn('"resources:update": "role:rgpu_heat_reader', policy)
 
     def test_only_a_dedicated_role_can_use_the_cross_scope_read_policy(self):
