@@ -72,6 +72,11 @@ class RemoteFailure(Exception):
     traceback = "internal traceback must not be shown"
 
 
+class ForbiddenFailure(Exception):
+    exc_type = "Forbidden"
+    value = "project policy denied the request (HTTP 403)"
+
+
 class ShowTests(unittest.TestCase):
     def test_show_includes_global_stack_identity_and_combined_status(self):
         rpc = FakeRPC([stack_details("CREATE", "FAILED", "Timed out")])
@@ -97,6 +102,13 @@ class ShowTests(unittest.TestCase):
 
 
 class DeleteTests(unittest.TestCase):
+    def test_recovery_flag_is_explicit(self):
+        args = admin_stack.build_parser().parse_args(
+            ["delete", STACK_ID, "--yes", "--recover-stale-credentials"]
+        )
+
+        self.assertTrue(args.recover_stale_credentials)
+
     def test_delete_requires_typed_uuid_when_interactive(self):
         rpc = FakeRPC([stack_details("CREATE", "FAILED")])
         output = io.StringIO()
@@ -339,6 +351,450 @@ class DeleteTests(unittest.TestCase):
         self.assertEqual(result, 0)
         prepare.assert_not_called()
         self.assertEqual(rpc.deleted[0][0], "system-admin")
+
+    def test_stale_trust_recovery_retries_normal_delete_with_project_admin(self):
+        rpc = FakeRPC(
+            [
+                stack_details("CREATE", "FAILED", "Timed out"),
+                stack_details("CREATE", "FAILED", "Timed out"),
+                stack_details("DELETE", "IN_PROGRESS"),
+                stack_details("DELETE", "COMPLETE"),
+            ]
+        )
+        rpc.delete_stack = mock.Mock(side_effect=[RemoteFailure(), None])
+        recovery = mock.Mock()
+        cleanup = mock.Mock()
+        project_context = SimpleNamespace(project_id=PROJECT_ID)
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        result = admin_stack._delete_stack(
+            rpc,
+            object(),
+            {
+                "stack_id": STACK_ID,
+                "stack_name": STACK_NAME,
+                "tenant": PROJECT_ID,
+            },
+            delete_context=None,
+            prepare_delete_context=lambda: admin_stack.DeleteAuth(
+                context=project_context,
+                cleanup=cleanup,
+            ),
+            recover_stale_credentials=recovery,
+            yes=True,
+            timeout=10,
+            stdin=io.StringIO(),
+            stdout=output,
+            stderr=errors,
+            sleep=lambda _seconds: None,
+            monotonic=lambda: 0.0,
+        )
+
+        self.assertEqual(result, 0)
+        recovery.assert_called_once_with()
+        self.assertEqual(rpc.delete_stack.call_count, 2)
+        self.assertIs(rpc.delete_stack.call_args_list[0].args[0], project_context)
+        self.assertIs(rpc.delete_stack.call_args_list[1].args[0], project_context)
+        self.assertIn("Detached stale Heat credentials", output.getvalue())
+        cleanup.assert_called_once_with()
+        self.assertEqual(errors.getvalue(), "")
+
+    def test_stale_trust_recovery_does_not_run_for_forbidden(self):
+        rpc = FakeRPC(
+            [
+                stack_details("CREATE", "FAILED"),
+                stack_details("CREATE", "FAILED"),
+            ]
+        )
+        rpc.delete_stack = mock.Mock(side_effect=ForbiddenFailure())
+        recovery = mock.Mock()
+        errors = io.StringIO()
+
+        result = admin_stack._delete_stack(
+            rpc,
+            object(),
+            {
+                "stack_id": STACK_ID,
+                "stack_name": STACK_NAME,
+                "tenant": PROJECT_ID,
+            },
+            delete_context=None,
+            prepare_delete_context=lambda: admin_stack.DeleteAuth(
+                context=SimpleNamespace(project_id=PROJECT_ID)
+            ),
+            recover_stale_credentials=recovery,
+            yes=True,
+            timeout=10,
+            stdin=io.StringIO(),
+            stdout=io.StringIO(),
+            stderr=errors,
+            sleep=lambda _seconds: None,
+            monotonic=lambda: 0.0,
+        )
+
+        self.assertEqual(result, 1)
+        recovery.assert_not_called()
+        self.assertEqual(rpc.delete_stack.call_count, 1)
+        self.assertIn("Forbidden", errors.getvalue())
+
+    def test_stale_trust_recovery_requires_owner_project_to_exist(self):
+        rpc = FakeRPC([stack_details("CREATE", "FAILED")])
+        recovery = mock.Mock()
+        errors = io.StringIO()
+
+        result = admin_stack._delete_stack(
+            rpc,
+            object(),
+            {
+                "stack_id": STACK_ID,
+                "stack_name": STACK_NAME,
+                "tenant": PROJECT_ID,
+            },
+            delete_context=None,
+            prepare_delete_context=lambda: admin_stack.DeleteAuth(
+                context=SimpleNamespace(project_id=None)
+            ),
+            recover_stale_credentials=recovery,
+            yes=True,
+            timeout=10,
+            stdin=io.StringIO(),
+            stdout=io.StringIO(),
+            stderr=errors,
+        )
+
+        self.assertEqual(result, 1)
+        recovery.assert_not_called()
+        self.assertEqual(rpc.deleted, [])
+        self.assertIn("keystone-manage project_setup", errors.getvalue())
+
+    def test_orphaned_stack_user_failure_retries_normal_heat_cleanup(self):
+        reason = (
+            "Resource DELETE failed: AttributeError: "
+            "resources.pipeline_wait_handle_odd: default_project_id"
+        )
+        rpc = FakeRPC(
+            [
+                stack_details("CREATE", "FAILED", "Timed out"),
+                stack_details("DELETE", "FAILED", reason),
+                stack_details("DELETE", "IN_PROGRESS"),
+                stack_details("DELETE", "COMPLETE"),
+            ]
+        )
+        project_context = SimpleNamespace(project_id=PROJECT_ID)
+        cleanup_orphan = mock.Mock(return_value=["pipeline_wait_handle_odd"])
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        result = admin_stack._delete_stack(
+            rpc,
+            object(),
+            {
+                "stack_id": STACK_ID,
+                "stack_name": STACK_NAME,
+                "tenant": PROJECT_ID,
+            },
+            delete_context=project_context,
+            cleanup_orphaned_heat_users=cleanup_orphan,
+            yes=True,
+            timeout=10,
+            stdin=io.StringIO(),
+            stdout=output,
+            stderr=errors,
+            sleep=lambda _seconds: None,
+            monotonic=lambda: 0.0,
+        )
+
+        self.assertEqual(result, 0)
+        cleanup_orphan.assert_called_once_with(
+            project_context, "pipeline_wait_handle_odd"
+        )
+        self.assertEqual(len(rpc.deleted), 2)
+        self.assertIn("Removed verified orphaned Heat stack user", output.getvalue())
+        self.assertIn("DELETE_COMPLETE", output.getvalue())
+        self.assertEqual(errors.getvalue(), "")
+
+    def test_orphaned_stack_user_cleanup_deletes_only_verified_orphan(self):
+        user_id = "orphan-stack-user"
+        stack_project = "heat-stack-project"
+        resource = SimpleNamespace(
+            name="pipeline_wait_handle_odd",
+            stack_id=STACK_ID,
+            physical_resource_id=user_id,
+            data=[SimpleNamespace(key="user_id", value=user_id)],
+        )
+        stack_record = SimpleNamespace(
+            owner_id=None,
+            tenant=PROJECT_ID,
+            stack_user_project_id=stack_project,
+        )
+
+        class FakeLock:
+            def __init__(self, context, stack_id, engine_id):
+                self.released = False
+
+            def try_acquire(self):
+                return None
+
+            def release(self):
+                self.released = True
+
+        lock = None
+
+        class CapturingLock(FakeLock):
+            def __init__(self, context, stack_id, engine_id):
+                nonlocal lock
+                super().__init__(context, stack_id, engine_id)
+                lock = self
+
+        class MissingProjectClient:
+            def get(self, project_id):
+                self.project_id = project_id
+                raise LookupError("missing stack-user project")
+
+        user_manager = SimpleNamespace(
+            get=mock.Mock(
+                return_value=SimpleNamespace(
+                    domain_id="heat-domain",
+                    _info={},
+                )
+            ),
+            delete=mock.Mock(),
+        )
+        role_assignments = SimpleNamespace(list=mock.Mock(return_value=[]))
+        domain_client = SimpleNamespace(
+            projects=MissingProjectClient(),
+            users=user_manager,
+            role_assignments=role_assignments,
+        )
+
+        class FakeKeystoneClient:
+            stack_domain = "heat"
+            stack_domain_id = "heat-domain"
+
+            def __init__(self, context):
+                self.domain_admin_client = domain_client
+
+        class StackManager:
+            get_by_id = mock.Mock(side_effect=[stack_record, stack_record])
+
+        resource_manager = SimpleNamespace(
+            get_all_by_root_stack=mock.Mock(return_value={"resource": resource}),
+            get_all_by_physical_resource_id=mock.Mock(return_value=[resource]),
+        )
+
+        result = admin_stack._cleanup_orphaned_heat_stack_users(
+            object(),
+            object(),
+            {"stack_id": STACK_ID, "tenant": PROJECT_ID},
+            "pipeline_wait_handle_odd",
+            stack_lock_class=CapturingLock,
+            stack_objects=SimpleNamespace(Stack=StackManager),
+            resource_objects=SimpleNamespace(Resource=resource_manager),
+            keystone_client_class=FakeKeystoneClient,
+            keystone_not_found=LookupError,
+        )
+
+        self.assertEqual(result, ["pipeline_wait_handle_odd"])
+        user_manager.get.assert_called_once_with(user_id)
+        user_manager.delete.assert_called_once_with(user_id)
+        role_assignments.list.assert_called_once_with(user=user_id)
+        self.assertTrue(lock.released)
+
+    def test_orphaned_stack_user_cleanup_skips_assigned_user(self):
+        user_id = "orphan-stack-user"
+        stack_record = SimpleNamespace(
+            owner_id=None,
+            tenant=PROJECT_ID,
+            stack_user_project_id="heat-stack-project",
+        )
+        resource = SimpleNamespace(
+            name="pipeline_wait_handle_odd",
+            stack_id=STACK_ID,
+            physical_resource_id=user_id,
+            data=[SimpleNamespace(key="user_id", value=user_id)],
+        )
+
+        class FakeLock:
+            def __init__(self, context, stack_id, engine_id):
+                self.released = False
+
+            def try_acquire(self):
+                return None
+
+            def release(self):
+                self.released = True
+
+        project_manager = SimpleNamespace(
+            get=mock.Mock(side_effect=LookupError("missing stack-user project"))
+        )
+        user_manager = SimpleNamespace(
+            get=mock.Mock(
+                return_value=SimpleNamespace(domain_id="heat-domain", _info={})
+            ),
+            delete=mock.Mock(),
+        )
+        role_assignments = SimpleNamespace(list=mock.Mock(return_value=[object()]))
+        domain_client = SimpleNamespace(
+            projects=project_manager,
+            users=user_manager,
+            role_assignments=role_assignments,
+        )
+
+        class FakeKeystoneClient:
+            stack_domain = "heat"
+            stack_domain_id = "heat-domain"
+
+            def __init__(self, context):
+                self.domain_admin_client = domain_client
+
+        class StackManager:
+            @staticmethod
+            def get_by_id(context, stack_id, **kwargs):
+                return stack_record
+
+        resource_manager = SimpleNamespace(
+            get_all_by_root_stack=mock.Mock(return_value={"resource": resource}),
+            get_all_by_physical_resource_id=mock.Mock(return_value=[resource]),
+        )
+
+        result = admin_stack._cleanup_orphaned_heat_stack_users(
+            object(),
+            object(),
+            {"stack_id": STACK_ID, "tenant": PROJECT_ID},
+            "pipeline_wait_handle_odd",
+            stack_lock_class=FakeLock,
+            stack_objects=SimpleNamespace(Stack=StackManager),
+            resource_objects=SimpleNamespace(Resource=resource_manager),
+            keystone_client_class=FakeKeystoneClient,
+            keystone_not_found=LookupError,
+        )
+
+        self.assertEqual(result, [])
+        user_manager.delete.assert_not_called()
+        role_assignments.list.assert_called_once_with(user=user_id)
+
+    def test_recovery_detaches_only_revoked_trust_credentials_under_lock(self):
+        credential_id = "stored-credential-id"
+        stack_record = SimpleNamespace(
+            owner_id=None,
+            tenant=PROJECT_ID,
+            user_creds_id=credential_id,
+            convergence=False,
+            current_traversal=None,
+        )
+
+        class FakeLock:
+            def __init__(self, context, stack_id, engine_id):
+                self.released = False
+
+            def try_acquire(self):
+                return None
+
+            def release(self):
+                self.released = True
+
+        lock = None
+
+        class CapturingLock(FakeLock):
+            def __init__(self, context, stack_id, engine_id):
+                nonlocal lock
+                super().__init__(context, stack_id, engine_id)
+                lock = self
+
+        stack_manager = SimpleNamespace(
+            get_by_id=mock.Mock(return_value=stack_record),
+            update_by_id=mock.Mock(return_value=True),
+            select_and_update=mock.Mock(),
+        )
+        user_creds = SimpleNamespace(trust_id="revoked-trust-id")
+        user_creds_manager = SimpleNamespace(
+            get_by_id=mock.Mock(return_value=user_creds),
+            delete=mock.Mock(),
+        )
+        stack_objects = SimpleNamespace(Stack=stack_manager)
+        user_creds_objects = SimpleNamespace(UserCreds=user_creds_manager)
+        trust_delete = mock.Mock()
+        system_admin = SimpleNamespace(
+            identity=SimpleNamespace(
+                trusts=SimpleNamespace(delete=trust_delete)
+            )
+        )
+
+        admin_stack._recover_stale_credentials(
+            object(),
+            {
+                "stack_id": STACK_ID,
+                "tenant": PROJECT_ID,
+            },
+            system_admin,
+            stack_lock_class=CapturingLock,
+            stack_objects=stack_objects,
+            user_creds_objects=user_creds_objects,
+            heat_not_found=LookupError,
+            keystone_not_found=KeyError,
+        )
+
+        trust_delete.assert_called_once_with("revoked-trust-id")
+        user_creds_manager.delete.assert_called_once_with(
+            mock.ANY, credential_id
+        )
+        stack_manager.update_by_id.assert_called_once_with(
+            mock.ANY,
+            STACK_ID,
+            {"user_creds_id": None},
+        )
+        self.assertTrue(lock.released)
+
+    def test_recovery_refuses_non_trust_credentials_without_mutating(self):
+        stack_record = SimpleNamespace(
+            owner_id=None,
+            tenant=PROJECT_ID,
+            user_creds_id="stored-credential-id",
+            convergence=False,
+            current_traversal=None,
+        )
+
+        class FakeLock:
+            def __init__(self, context, stack_id, engine_id):
+                self.released = False
+
+            def try_acquire(self):
+                return None
+
+            def release(self):
+                self.released = True
+
+        stack_manager = SimpleNamespace(
+            get_by_id=mock.Mock(return_value=stack_record),
+            update_by_id=mock.Mock(),
+        )
+        user_creds_manager = SimpleNamespace(
+            get_by_id=mock.Mock(return_value=SimpleNamespace(trust_id=None)),
+            delete=mock.Mock(),
+        )
+        trust_delete = mock.Mock()
+        system_admin = SimpleNamespace(
+            identity=SimpleNamespace(
+                trusts=SimpleNamespace(delete=trust_delete)
+            )
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "not a trust"):
+            admin_stack._recover_stale_credentials(
+                object(),
+                {"stack_id": STACK_ID, "tenant": PROJECT_ID},
+                system_admin,
+                stack_lock_class=FakeLock,
+                stack_objects=SimpleNamespace(Stack=stack_manager),
+                user_creds_objects=SimpleNamespace(UserCreds=user_creds_manager),
+                heat_not_found=LookupError,
+                keystone_not_found=KeyError,
+            )
+
+        trust_delete.assert_not_called()
+        user_creds_manager.delete.assert_not_called()
+        stack_manager.update_by_id.assert_not_called()
 
     def test_temporary_project_admin_role_is_retained_on_cleanup_failure(self):
         rpc = FakeRPC(

@@ -15,9 +15,14 @@ refresh the stack's stored trust before cleanup. If needed, it temporarily
 grants the system admin the project admin role and removes that grant after
 successful deletion in the same run. If deletion fails or times out, the grant
 stays in place for retry and the command reports how to remove it after
-cleanup. Missing-project stacks use Heat's normal RPC path and report any
-cleanup failure. This is an operator-only interface to Heat's internal RPC
-API, not a replacement for the public OpenStack API.
+cleanup. For a deleted owner project, restore a temporary Keystone project
+with the original UUID on a Keystone node, then opt in to
+``--recover-stale-credentials``. That mode uses Heat's versioned object API to
+remove an invalid stored trust credential before retrying the normal Heat
+resource deletion path. If that cleanup reaches a Heat stack user whose own
+project was deleted, it removes that unique, unassigned Heat-domain user so
+Heat's normal cleanup can continue. This is an operator-only interface to
+Heat internals, not a replacement for the public OpenStack API.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -120,6 +126,17 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help=f"wait this long for deletion to finish (default: {DEFAULT_TIMEOUT:g})",
     )
+    delete_parser.add_argument(
+        "--recover-stale-credentials",
+        action="store_true",
+        help=(
+            "if Heat cannot start deletion because a stored trust is invalid, "
+            "remove that stale Heat credential record and retry using a "
+            "project-scoped admin token; after a default_project_id cleanup "
+            "failure, remove only verified orphaned Heat stack users and "
+            "retry; requires the owner project to exist"
+        ),
+    )
     return parser
 
 
@@ -194,6 +211,302 @@ def _confirm_delete(
     return stdin.readline().strip() == stack_id
 
 
+def _is_unauthorized(exc: Exception) -> bool:
+    exc_type = str(getattr(exc, "exc_type", "")).lower()
+    summary = _exception_summary(exc).lower()
+    return (
+        "unauthorized" in exc_type
+        or "unauthorized" in summary
+        or "http 401" in summary
+    )
+
+
+def _recover_stale_credentials(
+    heat_context: Any,
+    identity: Mapping[str, Any],
+    system_admin: SystemAdminAuth,
+    *,
+    stack_lock_class: Any | None = None,
+    stack_objects: Any | None = None,
+    user_creds_objects: Any | None = None,
+    heat_not_found: type[Exception] | None = None,
+    keystone_not_found: type[Exception] | None = None,
+) -> None:
+    """Detach a revoked trust credential so Heat can delete as project admin.
+
+    Heat's RPC delete loads the old stored context before it schedules resource
+    cleanup. If that trust is invalid, the load fails with HTTP 401. After
+    revoking the trust if it still exists, remove its Heat UserCreds object and
+    clear the stack's reference while holding a Heat stack lock. The caller
+    then retries Heat's ordinary delete RPC with a project-scoped admin token.
+    """
+    if any(
+        value is None
+        for value in (
+            stack_lock_class,
+            stack_objects,
+            user_creds_objects,
+            heat_not_found,
+            keystone_not_found,
+        )
+    ):
+        from heat.common import exception as heat_exceptions
+        from heat.engine import stack_lock
+        from heat.objects import stack as stack_objects_module
+        from heat.objects import user_creds as user_creds_objects_module
+        from keystoneclient import exceptions as keystone_exceptions
+
+        stack_lock_class = stack_lock_class or stack_lock.StackLock
+        stack_objects = stack_objects or stack_objects_module
+        user_creds_objects = user_creds_objects or user_creds_objects_module
+        heat_not_found = heat_not_found or heat_exceptions.NotFound
+        keystone_not_found = keystone_not_found or keystone_exceptions.NotFound
+
+    stack_id = str(identity["stack_id"])
+    lock = stack_lock_class(
+        heat_context,
+        stack_id,
+        str(uuid.uuid4()),
+    )
+    lock_owner = lock.try_acquire()
+    if lock_owner is not None:
+        raise RuntimeError(
+            f"stack is currently locked by Heat engine {lock_owner}; "
+            "retry credential recovery after that operation finishes"
+        )
+
+    try:
+        stack = stack_objects.Stack.get_by_id(
+            heat_context,
+            stack_id,
+            show_deleted=False,
+            eager_load=False,
+        )
+        if stack is None:
+            raise RuntimeError("Heat stack disappeared before credential recovery")
+        if stack.owner_id:
+            raise RuntimeError(
+                "stale-credential recovery only supports top-level stacks"
+            )
+        if stack.tenant != identity.get("tenant"):
+            raise RuntimeError("stack owner changed before credential recovery")
+
+        credential_id = stack.user_creds_id
+        if not credential_id:
+            raise RuntimeError(
+                "Heat reports no stored credential reference to recover"
+            )
+
+        try:
+            user_creds = user_creds_objects.UserCreds.get_by_id(
+                heat_context, credential_id
+            )
+        except heat_not_found:
+            user_creds = None
+
+        if user_creds is not None:
+            trust_id = user_creds.trust_id
+            if not trust_id:
+                raise RuntimeError(
+                    "stored credentials are not a trust; refusing to clear them"
+                )
+            try:
+                system_admin.identity.trusts.delete(trust_id)
+            except keystone_not_found:
+                pass
+            # Delete first. If clearing the stack reference then fails, the
+            # next run detects this missing UserCreds row and clears the stale
+            # reference without needing to recover the trust ID again.
+            user_creds_objects.UserCreds.delete(heat_context, credential_id)
+
+        updates = {"user_creds_id": None}
+        if stack.convergence:
+            updated = stack_objects.Stack.select_and_update(
+                heat_context,
+                stack_id,
+                updates,
+                exp_trvsl=stack.current_traversal,
+            )
+        else:
+            updated = stack_objects.Stack.update_by_id(
+                heat_context, stack_id, updates
+            )
+        if not updated:
+            raise RuntimeError(
+                "Heat stack changed during credential recovery; "
+                "the credential reference was not cleared"
+            )
+    finally:
+        lock.release()
+
+
+def _orphaned_stack_user_resource(reason: str) -> str | None:
+    match = re.search(
+        r"resources\.([A-Za-z0-9_-]+): default_project_id\b",
+        reason,
+    )
+    return match.group(1) if match else None
+
+
+def _cleanup_orphaned_heat_stack_users(
+    heat_context: Any,
+    keystone_context: Any,
+    identity: Mapping[str, Any],
+    resource_name: str,
+    *,
+    stack_lock_class: Any | None = None,
+    stack_objects: Any | None = None,
+    resource_objects: Any | None = None,
+    keystone_client_class: Any | None = None,
+    keystone_not_found: type[Exception] | None = None,
+) -> list[str]:
+    """Remove unassigned Heat stack users for resources whose project is gone.
+
+    Heat's normal stack-user delete treats a missing Keystone user as success,
+    but in some Keystone responses ``default_project_id`` is absent after the
+    stack-user project has been deleted. That makes Heat fail before it can
+    reach its existing NotFound handling. This removes only users referenced
+    by the failed resource that are in Heat's configured stack domain, have no
+    default project, have no role assignments, and are not shared by another
+    Heat resource. The caller then retries Heat's ordinary resource deletion.
+    """
+    if any(
+        value is None
+        for value in (
+            stack_lock_class,
+            stack_objects,
+            resource_objects,
+            keystone_client_class,
+            keystone_not_found,
+        )
+    ):
+        from heat.engine import stack_lock
+        from heat.engine.clients.os.keystone.heat_keystoneclient import (
+            KeystoneClient,
+        )
+        from heat.objects import resource as resource_objects_module
+        from heat.objects import stack as stack_objects_module
+        from keystoneclient import exceptions as keystone_exceptions
+
+        stack_lock_class = stack_lock_class or stack_lock.StackLock
+        stack_objects = stack_objects or stack_objects_module
+        resource_objects = resource_objects or resource_objects_module
+        keystone_client_class = keystone_client_class or KeystoneClient
+        keystone_not_found = keystone_not_found or keystone_exceptions.NotFound
+
+    stack_id = str(identity["stack_id"])
+    lock = stack_lock_class(heat_context, stack_id, str(uuid.uuid4()))
+    lock_owner = lock.try_acquire()
+    if lock_owner is not None:
+        raise RuntimeError(
+            f"stack is currently locked by Heat engine {lock_owner}; "
+            "retry orphaned stack-user cleanup after that operation finishes"
+        )
+
+    try:
+        root_stack = stack_objects.Stack.get_by_id(
+            heat_context,
+            stack_id,
+            show_deleted=False,
+            eager_load=False,
+        )
+        if root_stack is None or root_stack.owner_id:
+            raise RuntimeError("orphan cleanup requires a top-level Heat stack")
+        if root_stack.tenant != identity.get("tenant"):
+            raise RuntimeError("stack owner changed before orphan cleanup")
+
+        all_resources = resource_objects.Resource.get_all_by_root_stack(
+            heat_context, stack_id, filters=None, cache=False
+        )
+        if isinstance(all_resources, Mapping):
+            all_resources = all_resources.values()
+        matching_resources = [
+            resource
+            for resource in all_resources
+            if getattr(resource, "name", None) == resource_name
+        ]
+        if not matching_resources:
+            raise RuntimeError(
+                f"Heat resource {resource_name} is not part of this stack"
+            )
+
+        keystone = keystone_client_class(keystone_context)
+        if not keystone.stack_domain:
+            raise RuntimeError("Heat stack-user domain is not configured")
+        domain_client = keystone.domain_admin_client
+        heat_domain_id = keystone.stack_domain_id
+        removed: list[str] = []
+
+        for resource in matching_resources:
+            user_ids = [
+                item.value
+                for item in (getattr(resource, "data", None) or [])
+                if getattr(item, "key", None) == "user_id" and item.value
+            ]
+            if not user_ids:
+                continue
+            if len(user_ids) != 1:
+                raise RuntimeError(
+                    f"Heat resource {resource_name} has an ambiguous user reference"
+                )
+
+            user_id = str(user_ids[0])
+            if getattr(resource, "physical_resource_id", None) != user_id:
+                continue
+
+            references = resource_objects.Resource.get_all_by_physical_resource_id(
+                heat_context, user_id
+            )
+            if (
+                len(references) != 1
+                or references[0].stack_id != resource.stack_id
+                or references[0].name != resource.name
+            ):
+                continue
+
+            resource_stack = stack_objects.Stack.get_by_id(
+                heat_context,
+                resource.stack_id,
+                show_deleted=False,
+                eager_load=False,
+            )
+            stack_user_project_id = getattr(
+                resource_stack, "stack_user_project_id", None
+            )
+            if not stack_user_project_id:
+                continue
+            try:
+                domain_client.projects.get(stack_user_project_id)
+            except keystone_not_found:
+                pass
+            else:
+                continue
+
+            try:
+                user = domain_client.users.get(user_id)
+            except keystone_not_found:
+                removed.append(resource.name)
+                continue
+
+            if getattr(user, "domain_id", None) != heat_domain_id:
+                continue
+            user_info = getattr(user, "_info", {})
+            if user_info.get("default_project_id"):
+                continue
+            if domain_client.role_assignments.list(user=user_id):
+                continue
+
+            try:
+                domain_client.users.delete(user_id)
+            except keystone_not_found:
+                pass
+            removed.append(resource.name)
+
+        return removed
+    finally:
+        lock.release()
+
+
 def _delete_stack(
     rpc: Any,
     read_context: Any,
@@ -201,6 +514,8 @@ def _delete_stack(
     *,
     delete_context: Any | None,
     prepare_delete_context: Callable[[], DeleteAuth] | None = None,
+    recover_stale_credentials: Callable[[], None] | None = None,
+    cleanup_orphaned_heat_users: Callable[[Any, str], list[str]] | None = None,
     yes: bool,
     timeout: float,
     stdin: TextIO,
@@ -250,12 +565,32 @@ def _delete_stack(
         except Exception as exc:
             start_error = exc
 
+    if (
+        recover_stale_credentials is not None
+        and start_error is None
+        and (
+            delete_auth is None
+            or getattr(delete_auth.context, "project_id", None) != project_id
+        )
+    ):
+        print(
+            f"Stale-credential recovery requires Keystone project {project_id} "
+            "to exist. On a Keystone node, restore a temporary project with: "
+            f"keystone-manage project_setup --project-name "
+            f"heat-recovery-{stack_id[:8]} --project-id {project_id}",
+            file=stderr,
+        )
+        return 1
+
     if delete_auth and delete_auth.context is not None and start_error is None:
         try:
             rpc.delete_stack(delete_auth.context, identity)
         except Exception as exc:
             start_error = exc
-            if prepare_delete_context is not None and delete_context is not None:
+            can_check_after_error = recover_stale_credentials is not None or (
+                prepare_delete_context is not None and delete_context is not None
+            )
+            if can_check_after_error:
                 try:
                     after_initial_attempt = _stack_details(
                         rpc, read_context, identity
@@ -274,24 +609,38 @@ def _delete_stack(
                         current = after_initial_attempt
                         start_error = None
                     elif after_status == current["stack_status"]:
-                        try:
-                            fallback_auth = prepare_delete_context()
-                        except Exception as fallback_exc:
-                            start_error = fallback_exc
-                        else:
-                            if fallback_auth.context is not delete_context:
-                                delete_auth = fallback_auth
-                                if delete_auth.retained_grant_notice:
-                                    print(
-                                        delete_auth.retained_grant_notice,
-                                        file=stdout,
-                                    )
-                                try:
-                                    rpc.delete_stack(delete_auth.context, identity)
-                                except Exception as fallback_exc:
-                                    start_error = fallback_exc
-                                else:
-                                    start_error = None
+                        if recover_stale_credentials and _is_unauthorized(exc):
+                            try:
+                                recover_stale_credentials()
+                                print(
+                                    "Detached stale Heat credentials; retrying "
+                                    "normal Heat resource deletion with project admin.",
+                                    file=stdout,
+                                )
+                                rpc.delete_stack(delete_auth.context, identity)
+                            except Exception as recovery_exc:
+                                start_error = recovery_exc
+                            else:
+                                start_error = None
+                        elif prepare_delete_context is not None and delete_context is not None:
+                            try:
+                                fallback_auth = prepare_delete_context()
+                            except Exception as fallback_exc:
+                                start_error = fallback_exc
+                            else:
+                                if fallback_auth.context is not delete_context:
+                                    delete_auth = fallback_auth
+                                    if delete_auth.retained_grant_notice:
+                                        print(
+                                            delete_auth.retained_grant_notice,
+                                            file=stdout,
+                                        )
+                                    try:
+                                        rpc.delete_stack(delete_auth.context, identity)
+                                    except Exception as fallback_exc:
+                                        start_error = fallback_exc
+                                    else:
+                                        start_error = None
 
     if start_error is not None or delete_auth is None:
         exc = start_error or RuntimeError("unable to prepare Heat deletion context")
@@ -308,6 +657,8 @@ def _delete_stack(
     deadline = monotonic() + timeout
     last_status: str | None = None
     latest: dict[str, Any] = current
+    attempted_orphan_user_cleanup = False
+    orphan_user_retry_deadline = 0.0
     while True:
         try:
             latest = _stack_details(rpc, read_context, identity)
@@ -343,6 +694,52 @@ def _delete_stack(
             return 0
         if status in {"DELETE_FAILED", "DELETE_CANCELLED"}:
             reason = latest.get("stack_status_reason") or "Heat reported no reason."
+            resource_name = _orphaned_stack_user_resource(reason)
+            if (
+                status == "DELETE_FAILED"
+                and resource_name
+                and cleanup_orphaned_heat_users is not None
+                and not attempted_orphan_user_cleanup
+            ):
+                attempted_orphan_user_cleanup = True
+                try:
+                    removed_resources = cleanup_orphaned_heat_users(
+                        delete_auth.context,
+                        resource_name,
+                    )
+                except Exception as exc:
+                    print(
+                        "Unable to verify or remove the orphaned Heat stack "
+                        f"user for {resource_name}: {_exception_summary(exc)}",
+                        file=stderr,
+                    )
+                else:
+                    if removed_resources:
+                        names = ", ".join(sorted(set(removed_resources)))
+                        print(
+                            f"Removed verified orphaned Heat stack user(s) for "
+                            f"{names}; retrying normal Heat resource cleanup.",
+                            file=stdout,
+                        )
+                        try:
+                            rpc.delete_stack(delete_auth.context, identity)
+                        except Exception as exc:
+                            print(
+                                "Heat could not retry stack deletion after "
+                                "orphaned user cleanup: "
+                                f"{_exception_summary(exc)}",
+                                file=stderr,
+                            )
+                        else:
+                            last_status = status
+                            orphan_user_retry_deadline = min(
+                                deadline, monotonic() + 15.0
+                            )
+                            sleep(POLL_INTERVAL)
+                            continue
+            if attempted_orphan_user_cleanup and monotonic() < orphan_user_retry_deadline:
+                sleep(POLL_INTERVAL)
+                continue
             print(f"Stack {stack_id} deletion failed: {reason}", file=stderr)
             if delete_auth and delete_auth.retained_grant_notice:
                 print(delete_auth.retained_grant_notice, file=stderr)
@@ -671,6 +1068,8 @@ def _run_rpc_command(
 
     delete_context = context if injected_rpc_context else None
     prepare_delete_context = None
+    recover_stale_credentials = None
+    cleanup_orphaned_heat_users = None
     if not injected_rpc_context:
         try:
             system_admin = _initialize_system_admin_context()
@@ -695,12 +1094,37 @@ def _run_rpc_command(
             system_admin, str(identity["tenant"])
         )
 
+    if args.recover_stale_credentials:
+        if injected_rpc_context:
+            print(
+                "Stale-credential recovery requires the root CLI so it can "
+                "authenticate to Keystone as system admin.",
+                file=stderr,
+            )
+            return 1
+        delete_context = None
+        recover_stale_credentials = lambda: _recover_stale_credentials(
+            context,
+            identity,
+            system_admin,
+        )
+        cleanup_orphaned_heat_users = lambda keystone_context, resource_name: (
+            _cleanup_orphaned_heat_stack_users(
+                context,
+                keystone_context,
+                identity,
+                resource_name,
+            )
+        )
+
     return _delete_stack(
         rpc,
         context,
         identity,
         delete_context=delete_context,
         prepare_delete_context=prepare_delete_context,
+        recover_stale_credentials=recover_stale_credentials,
+        cleanup_orphaned_heat_users=cleanup_orphaned_heat_users,
         yes=args.yes,
         timeout=args.timeout,
         stdin=stdin,
