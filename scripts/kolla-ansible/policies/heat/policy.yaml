@@ -1,17 +1,17 @@
-# Data workspace stacks may be managed by editors; destructive lifecycle is
-# reserved for Data administrators.
+# Project-scoped members can inspect stacks, list their resources, and delete
+# stacks in their own project. Keep Data service and RGPU grants as configured.
 "stacks:create": "role:data_editor or role:data_admin"
-"stacks:show": "role:data_reader or role:data_editor or role:data_admin or (role:rgpu_heat_reader and project_id:%(project_id)s)"
-"stacks:list": "role:data_reader or role:data_editor or role:data_admin"
-"stacks:delete": "role:data_admin or (role:rgpu_recovery and project_id:%(project_id)s)"
+"stacks:show": "role:data_reader or role:data_editor or role:data_admin or (role:member and project_id:%(project_id)s) or (role:rgpu_heat_reader and project_id:%(project_id)s)"
+"stacks:index": "role:data_reader or role:data_editor or role:data_admin or (role:member and project_id:%(project_id)s)"
+"stacks:delete": "role:data_admin or (role:member and project_id:%(project_id)s) or (role:rgpu_recovery and project_id:%(project_id)s)"
 
 # Heat binds each request to the project ID in the URL before policy checks.
 # The inherited RGPU Heat role therefore uses a project-scoped token and only
 # receives stack lookup/show, template, and resource reads in that project.
 # A separate inherited RGPU recovery role may delete only stacks in its own
 # project when recovering an already verified remote-model deletion.
-"stacks:lookup": "role:rgpu_heat_reader and project_id:%(project_id)s"
+"stacks:lookup": "(role:member and project_id:%(project_id)s) or (role:rgpu_heat_reader and project_id:%(project_id)s)"
 "stacks:template": "role:rgpu_heat_reader and project_id:%(project_id)s"
 # Standard readers can inspect resources in their scoped project; retain the
 # separate project-scoped grant used by RGPU ownership verification.
-"resource:index": "(role:reader and project_id:%(project_id)s) or (role:rgpu_heat_reader and project_id:%(project_id)s)"
+"resource:index": "(role:reader and project_id:%(project_id)s) or (role:member and project_id:%(project_id)s) or (role:rgpu_heat_reader and project_id:%(project_id)s)"

@@ -46,20 +46,32 @@ class RgpuAuthorizationPolicyTests(unittest.TestCase):
             policy,
         )
 
-    def test_heat_allows_only_stack_template_and_resource_reads(self):
+    def test_heat_grants_project_members_stack_and_resource_access(self):
         policy = (ROOT / "scripts/kolla-ansible/policies/heat/policy.yaml").read_text()
 
-        self.assertIn('"stacks:show":', policy)
+        self.assertIn(
+            '"stacks:index": "role:data_reader or role:data_editor or '
+            'role:data_admin or (role:member and project_id:%(project_id)s)"',
+            policy,
+        )
+        self.assertIn(
+            '"stacks:show": "role:data_reader or role:data_editor or '
+            'role:data_admin or (role:member and project_id:%(project_id)s) or '
+            '(role:rgpu_heat_reader and project_id:%(project_id)s)"',
+            policy,
+        )
         self.assertIn(
             '"stacks:template": "role:rgpu_heat_reader and project_id:%(project_id)s"',
             policy,
         )
         self.assertIn(
-            '"stacks:lookup": "role:rgpu_heat_reader and project_id:%(project_id)s"',
+            '"stacks:lookup": "(role:member and project_id:%(project_id)s) or '
+            '(role:rgpu_heat_reader and project_id:%(project_id)s)"',
             policy,
         )
         self.assertIn(
             '"resource:index": "(role:reader and project_id:%(project_id)s) or '
+            '(role:member and project_id:%(project_id)s) or '
             '(role:rgpu_heat_reader and project_id:%(project_id)s)"',
             policy,
         )
@@ -70,13 +82,14 @@ class RgpuAuthorizationPolicyTests(unittest.TestCase):
             '(role:rgpu_heat_reader and project_id:%(project_id)s)',
             policy,
         )
-        self.assertNotIn('"stacks:list": "role:rgpu_heat_reader', policy)
-        self.assertNotIn('"stacks:delete": "role:rgpu_heat_reader', policy)
+        self.assertNotIn('"stacks:list":', policy)
         self.assertIn(
             '"stacks:delete": "role:data_admin or '
+            '(role:member and project_id:%(project_id)s) or '
             '(role:rgpu_recovery and project_id:%(project_id)s)"',
             policy,
         )
+        self.assertNotIn('"stacks:delete": "role:rgpu_heat_reader', policy)
         self.assertNotIn('"resources:update": "role:rgpu_heat_reader', policy)
 
     def test_only_a_dedicated_role_can_use_the_cross_scope_read_policy(self):
