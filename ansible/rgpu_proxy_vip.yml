@@ -85,7 +85,7 @@
     - name: Check whether the RGPU VIP is already configured on this interface
       ansible.builtin.shell: >-
         ip -o -4 addr show dev {{ yggdrasil_rgpu_proxy_vip_interface_effective | quote }} |
-        awk '{split($4, address, "/"); if (address[1] == {{ yggdrasil_rgpu_proxy_vip_address | quote }}) print $4}'
+        awk '{split($4, address, "/"); if (address[1] == {{ yggdrasil_rgpu_proxy_vip_address | to_json }}) print $4}'
       args:
         executable: /bin/bash
       register: yggdrasil_rgpu_vip_interface_addresses
@@ -106,7 +106,7 @@
       ansible.builtin.shell: >-
         if docker ps -q --filter 'name=^/yggdrasil_rgpu_proxy_vip$' | grep -q . &&
            ip -o -4 addr show dev {{ yggdrasil_rgpu_proxy_vip_interface_effective | quote }} |
-           awk '{split($4, address, "/"); if (address[1] == {{ yggdrasil_rgpu_proxy_vip_address | quote }}) found=1} END {exit !found}'; then
+           awk '{split($4, address, "/"); if (address[1] == {{ yggdrasil_rgpu_proxy_vip_address | to_json }}) found=1} END {exit !found}'; then
           echo managed-owner
         fi
       args:
