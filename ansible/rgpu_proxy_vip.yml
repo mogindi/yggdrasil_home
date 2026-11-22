@@ -12,6 +12,9 @@
     yggdrasil_rgpu_proxy_vip_interface_effective: "{{ network_yggdrasil_rgpu_proxy_vip_interface | default('') }}"
     yggdrasil_rgpu_proxy_vip_router_id_effective: "{{ network_yggdrasil_rgpu_proxy_vip_router_id | default(0) | int }}"
     yggdrasil_rgpu_proxy_vip_node_ip: "{{ network_openstack_mgmt_ip | ansible.utils.ipv4('address') }}"
+    yggdrasil_rgpu_keepalived_runtime_dir_effective: >-
+      {{ yggdrasil_rgpu_keepalived_runtime_dir
+         | default(ansible_user_dir ~ '/.config/yggdrasil/rgpu-proxy-vip', true) }}
     yggdrasil_rgpu_root_effective: >-
       {{ yggdrasil_internal_root ~ '/yggdrasil_rgpu'
          if ansible_connection == 'local' and yggdrasil_internal_root is defined
@@ -23,9 +26,10 @@
           yggdrasil_rgpu_proxy_vip_node_ip,
           groups['deployment_nodes'] | map('extract', hostvars, 'network_openstack_mgmt_ip') | list,
           keepalived_key[:8],
-          'config_directory_bind_rw_v4_clear_osixia_defaults'] | to_json | hash('sha256') }}
-    yggdrasil_rgpu_keepalived_config_dir: "{{ yggdrasil_rgpu_root_effective }}/keepalived"
-    yggdrasil_rgpu_keepalived_config_path: "{{ yggdrasil_rgpu_root_effective | default('yggdrasil_rgpu') }}/keepalived/keepalived.conf"
+          yggdrasil_rgpu_keepalived_runtime_dir_effective,
+          'runtime_config_outside_git_checkout_v1'] | to_json | hash('sha256') }}
+    yggdrasil_rgpu_keepalived_config_dir: "{{ yggdrasil_rgpu_keepalived_runtime_dir_effective }}"
+    yggdrasil_rgpu_keepalived_config_path: "{{ yggdrasil_rgpu_keepalived_runtime_dir_effective }}/keepalived.conf"
   tasks:
     - name: Validate RGPU proxy VIP inventory settings
       ansible.builtin.assert:
