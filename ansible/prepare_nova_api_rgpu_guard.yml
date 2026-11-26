@@ -1,0 +1,131 @@
+---
+- name: Build the Nova API image with the Yggdrasil RGPU guard overlay
+  hosts: deployment_nodes
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    kolla_config_dir: "{{ playbook_dir }}/../workspace/etc/kolla"
+    marketplace_template_base_url: "{{ yggdrasil_marketplace_template_base_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':8093') | regex_replace('/+$', '') }}/api/v1/templates"
+    nova_rgpu_image: "quay.io/openstack.kolla/nova-api:{{ openstack_release }}-ubuntu-{% if (openstack_release|string) == '2025.2' %}noble{% else %}jammy{% endif %}"
+  tasks:
+    - name: Require the supported Kolla release
+      ansible.builtin.assert:
+        that:
+          - (openstack_release | string) == '2025.2'
+        fail_msg: "The Nova RGPU guard image overlay currently supports Kolla 2025.2."
+
+    - name: Create temporary Nova API image build directory
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: nova-api-rgpu-guard
+      register: nova_rgpu_image_build_dir
+
+    - name: Copy the Nova API RGPU guard image overlay
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../scripts/kolla-ansible/nova-api-rgpu-guard/"
+        dest: "{{ nova_rgpu_image_build_dir.path }}/"
+        mode: preserve
+
+    - name: Create the approved template snapshot directory in the image context
+      ansible.builtin.file:
+        path: "{{ nova_rgpu_image_build_dir.path }}/yggdrasil-approved-templates"
+        state: directory
+        mode: "0755"
+
+    - name: Check for previously approved template snapshots
+      ansible.builtin.stat:
+        path: "{{ kolla_config_dir }}/config/nova/yggdrasil-approved-templates"
+      delegate_to: localhost
+      run_once: true
+      register: existing_approved_template_directory
+
+    - name: Include prior marketplace template snapshots in the image
+      ansible.builtin.copy:
+        src: "{{ kolla_config_dir }}/config/nova/yggdrasil-approved-templates/"
+        dest: "{{ nova_rgpu_image_build_dir.path }}/yggdrasil-approved-templates/"
+        mode: preserve
+      when: hostvars[groups['deployment_nodes'][0]].existing_approved_template_directory.stat.exists
+
+    - name: Read the approved remote-model Heat module from the marketplace
+      ansible.builtin.uri:
+        url: "{{ marketplace_template_base_url }}/modules/apps/remote_ollama_model.yaml"
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: approved_remote_model_template
+      changed_when: false
+      run_once: true
+
+    - name: Read the approved Fedora CoreOS Heat module from the marketplace
+      ansible.builtin.uri:
+        url: "{{ marketplace_template_base_url }}/modules/compute/coreos_server.yaml"
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: approved_coreos_server_template
+      changed_when: false
+      run_once: true
+
+    - name: Validate the marketplace templates required by the guard
+      ansible.builtin.assert:
+        that:
+          - (hostvars[groups['deployment_nodes'][0]].approved_remote_model_template.content | from_yaml).resources.server is defined
+          - (hostvars[groups['deployment_nodes'][0]].approved_remote_model_template.content | from_yaml).parameters.admin_ssh_public_key_blob.default is defined
+          - (hostvars[groups['deployment_nodes'][0]].approved_coreos_server_template.content | from_yaml).resources.server.type == 'OS::Nova::Server'
+        fail_msg: >-
+          The marketplace remote-model or Fedora CoreOS template is missing
+          required RGPU guard structure.
+      run_once: true
+
+    - name: Add the current approved remote-model template to the image
+      ansible.builtin.copy:
+        content: "{{ hostvars[groups['deployment_nodes'][0]].approved_remote_model_template.content }}"
+        dest: >-
+          {{ nova_rgpu_image_build_dir.path }}/yggdrasil-approved-templates/remote_model_{{ hostvars[groups['deployment_nodes'][0]].approved_remote_model_template.content | hash('sha256') }}.yaml
+        mode: "0644"
+
+    - name: Add the current approved Fedora CoreOS template to the image
+      ansible.builtin.copy:
+        content: "{{ hostvars[groups['deployment_nodes'][0]].approved_coreos_server_template.content }}"
+        dest: >-
+          {{ nova_rgpu_image_build_dir.path }}/yggdrasil-approved-templates/coreos_server_{{ hostvars[groups['deployment_nodes'][0]].approved_coreos_server_template.content | hash('sha256') }}.yaml
+        mode: "0644"
+
+    - name: Build the Nova API image with the Yggdrasil RGPU guard
+      ansible.builtin.shell: |
+        set -euo pipefail
+        image={{ nova_rgpu_image }}
+        docker pull "$image"
+        docker build --network host \
+          --build-arg BASE_IMAGE="$image" \
+          --tag "$image" \
+          --file {{ nova_rgpu_image_build_dir.path }}/Dockerfile \
+          {{ nova_rgpu_image_build_dir.path }}
+      args:
+        executable: /bin/bash
+      register: nova_rgpu_image_build
+      changed_when: true
+
+    - name: Verify the built Nova API image can load both approved template sets
+      ansible.builtin.command:
+        argv:
+          - docker
+          - run
+          - --rm
+          - --entrypoint
+          - /var/lib/kolla/venv/bin/python
+          - "{{ nova_rgpu_image }}"
+          - -c
+          - >-
+            from yggdrasil_nova_guard.heat import HeatReader;
+            reader = HeatReader('http://localhost/v3', 'http://localhost/v1', 'reader', '');
+            assert reader._approved_templates_for('remote_model_');
+            assert reader._approved_templates_for('coreos_server_')
+      changed_when: false
+
+    - name: Remove the temporary Nova API image build directory
+      ansible.builtin.file:
+        path: "{{ nova_rgpu_image_build_dir.path }}"
+        state: absent

@@ -1,0 +1,20 @@
+{% set heat_engine_sources = [openstack_kolla_internal_vip_address ~ '/32'] %}
+{% for host in groups['deployment_nodes'] %}
+{% set _ = heat_engine_sources.append((hostvars[host].network_openstack_mgmt_ip | ansible.utils.ipaddr('address')) ~ '/32') %}
+{% endfor %}
+frontend nova_rgpu_heat_internal
+    bind {{ openstack_kolla_internal_vip_address }}:18775
+    mode http
+    option httplog
+    acl heat_engine_source src {{ heat_engine_sources | join(' ') }}
+    http-request deny deny_status 403 unless heat_engine_source
+    http-request del-header X-Yggdrasil-Heat-Authorization
+    http-request set-header X-Yggdrasil-Heat-Authorization {{ nova_rgpu_heat_secret }}
+    default_backend nova_rgpu_heat_backend
+
+backend nova_rgpu_heat_backend
+    mode http
+    balance roundrobin
+{% for host in groups['deployment_nodes'] %}
+    server nova_api_{{ loop.index }} {{ hostvars[host].network_openstack_mgmt_ip | ansible.utils.ipaddr('address') }}:8774 check
+{% endfor %}

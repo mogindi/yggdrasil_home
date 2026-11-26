@@ -591,6 +591,21 @@ Below is a complete catalog of Make targets in this repo.
 
 ### OpenStack initialization targets
 
+- `openstack-rgpu-guard` — builds the Nova API middleware overlay and enables
+  the Nova RGPU flavor/VM guard. The flavors stay public underneath because
+  project-scoped Heat needs to use them; the Nova API middleware hides them
+  from tenant catalogs and blocks direct use. The guard compares the Heat
+  template and nested Fedora CoreOS template against snapshots fetched from
+  the internal marketplace, and requires the platform SSH key. Snapshots are
+  bundled in the Nova API overlay image and retained by content hash so
+  existing model stacks remain manageable after a marketplace template update.
+  Tenant users, including project admins, cannot
+  list or request those flavors or see/manage the Heat-owned VM; only a
+  system-scoped platform admin bypasses the guard. Run after deploying the
+  `yggdrasil-rgpu-reader` Heat read role, marketplace, and public Fedora CoreOS
+  image. This target uses the
+  `../yggdrasil_inventory/aio/ansible_inventory` inventory and the normal
+  `~/.ansible_vault` password file.
 - `openstack-client-install` — installs OpenStack client tooling.
 - `free-disk-space` — runs the guarded, multi-node disk cleanup playbook;
   node-local work is serialized and OpenSearch cleanup runs once per cluster.

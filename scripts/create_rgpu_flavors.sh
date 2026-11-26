@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Create public remote-GPU billing flavors with the same compute sizing as
-# m1.small. The actual GPU is provisioned separately by the RGPU service.
+# m1.small. The Nova API guard hides them from tenants and allows their use
+# only from approved remote-model Heat stacks.
 
 command -v openstack >/dev/null || {
   echo "ERROR: OpenStack CLI is not available on PATH." >&2
@@ -93,17 +94,7 @@ print(next((value for key, value in flavor.items()
             if str(key).lower() in {"is_public", "os-flavor-access:is_public"}), False))
 ' <<<"$flavor_json")"
   if [[ "${is_public,,}" != "true" ]]; then
-    openstack flavor set --public "$flavor_name"
-    flavor_json="$(openstack flavor show "$flavor_name" -f json)"
-    is_public="$(python3 -c '
-import json, sys
-flavor = json.load(sys.stdin)
-print(next((value for key, value in flavor.items()
-            if str(key).lower() in {"is_public", "os-flavor-access:is_public"}), False))
-' <<<"$flavor_json")"
-  fi
-  if [[ "${is_public,,}" != "true" ]]; then
-    echo "ERROR: $flavor_name could not be made public." >&2
+    echo "ERROR: $flavor_name must be public for project-scoped Heat launches." >&2
     return 1
   fi
 }

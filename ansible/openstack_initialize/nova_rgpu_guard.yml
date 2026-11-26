@@ -1,0 +1,331 @@
+---
+- name: Install the Nova RGPU flavor and managed VM guard
+  hosts: deployment_controller
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    kolla_config_dir: "{{ playbook_dir }}/../../workspace/etc/kolla"
+    rgpu_flavors:
+      - t1.rgpu
+      - t2.rgpu
+      - t3.rgpu
+      - t4.rgpu
+      - t5.rgpu
+    fcos_image_name: fedora-coreos-38.20230806.3.0-openstack.x86_64
+    nova_rgpu_secret_file: "{{ playbook_dir }}/../../workspace/etc/kolla/nova-rgpu-heat-secret"
+    nova_rgpu_heat_secret: "{{ lookup('password', nova_rgpu_secret_file ~ ' chars=ascii_letters,digits length=64') }}"
+    rgpu_reader_username: yggdrasil-rgpu-reader
+    rgpu_reader_password: "{{ rgpu_openstack_reader_password }}"
+    internal_keystone_url: "http://{{ openstack_kolla_internal_vip_address }}:5000/v3"
+    internal_heat_url: "http://{{ openstack_kolla_internal_vip_address }}:8004/v1"
+    internal_nova_admin_url: "http://{{ openstack_kolla_internal_vip_address }}:18775/v2.1"
+    marketplace_template_base_url: "{{ yggdrasil_marketplace_template_base_url | default('http://' ~ openstack_kolla_internal_vip_address ~ ':8093') | regex_replace('/+$', '') }}/api/v1/templates"
+    openstack_region: "{{ openstack_region_name | default('RegionOne') }}"
+  tasks:
+    - name: Require the supported Kolla release and reader credentials
+      ansible.builtin.assert:
+        that:
+          - (openstack_release | string) == '2025.2'
+          - rgpu_openstack_reader_password is defined
+          - (rgpu_openstack_reader_password | string | length) >= 32
+          - groups['deployment_nodes'] | length > 0
+        fail_msg: >-
+          The Nova RGPU guard currently supports Kolla 2025.2 and needs the
+          vaulted yggdrasil-rgpu-reader credential from yggdrasil_inventory.
+      no_log: true
+
+    - name: Confirm the Heat reader identity and role exist
+      ansible.builtin.shell: >-
+        source workspace/kolla-venv/bin/activate &&
+        source workspace/etc/kolla/admin-openrc.sh &&
+        openstack user show {{ rgpu_reader_username }} -f value -c id >/dev/null &&
+        openstack role show rgpu_heat_reader -f value -c id >/dev/null
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      changed_when: false
+
+    - name: Validate the reader password with a project-scoped Keystone token
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../../workspace/kolla-venv/bin/openstack"
+          - token
+          - issue
+          - -f
+          - value
+          - -c
+          - expires
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+      environment:
+        OS_AUTH_URL: "{{ internal_keystone_url }}"
+        OS_USERNAME: "{{ rgpu_reader_username }}"
+        OS_PASSWORD: "{{ rgpu_reader_password }}"
+        OS_USER_DOMAIN_NAME: Default
+        OS_PROJECT_NAME: service
+        OS_PROJECT_DOMAIN_NAME: Default
+        OS_IDENTITY_API_VERSION: "3"
+        OS_INTERFACE: internal
+        OS_REGION_NAME: "{{ openstack_region }}"
+      changed_when: false
+      no_log: true
+
+    - name: Ensure RGPU flavors exist for approved Heat launches
+      ansible.builtin.shell: >-
+        set -euo pipefail;
+        source workspace/kolla-venv/bin/activate;
+        source workspace/etc/kolla/admin-openrc.sh;
+        bash scripts/create_rgpu_flavors.sh
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      register: rgpu_flavors_prepare
+      changed_when: '"Creating public flavor" in rgpu_flavors_prepare.stdout'
+
+    - name: Read Fedora CoreOS image record
+      ansible.builtin.shell: >-
+        source workspace/kolla-venv/bin/activate &&
+        source workspace/etc/kolla/admin-openrc.sh &&
+        openstack image show {{ fcos_image_name }} -f json
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      register: fcos_image_record
+      changed_when: false
+
+    - name: Validate Fedora CoreOS image is active and public
+      ansible.builtin.assert:
+        that:
+          - (fcos_image_record.stdout | from_json).id is defined
+          - (fcos_image_record.stdout | from_json).status == 'active'
+          - (fcos_image_record.stdout | from_json).visibility == 'public'
+        fail_msg: "The expected public Fedora CoreOS image is missing or inactive."
+
+    - name: Read RGPU flavor IDs
+      ansible.builtin.shell: >-
+        source workspace/kolla-venv/bin/activate &&
+        source workspace/etc/kolla/admin-openrc.sh &&
+        openstack flavor show {{ item }} -f value -c id
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      loop: "{{ rgpu_flavors }}"
+      register: rgpu_flavor_records
+      changed_when: false
+
+    - name: Ensure Kolla configuration paths exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0750"
+      loop:
+        - "{{ kolla_config_dir }}/config"
+        - "{{ kolla_config_dir }}/config/nova/yggdrasil-approved-templates"
+        - "{{ kolla_config_dir }}/config/haproxy/services.d"
+
+    - name: Read the approved remote-model Heat module from the marketplace
+      ansible.builtin.uri:
+        url: "{{ marketplace_template_base_url }}/modules/apps/remote_ollama_model.yaml"
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: approved_remote_model_template
+      changed_when: false
+
+    - name: Read the approved Fedora CoreOS Heat module from the marketplace
+      ansible.builtin.uri:
+        url: "{{ marketplace_template_base_url }}/modules/compute/coreos_server.yaml"
+        method: GET
+        return_content: true
+        status_code: 200
+        timeout: 10
+      register: approved_coreos_server_template
+      changed_when: false
+
+    - name: Validate the marketplace templates required by the guard
+      ansible.builtin.assert:
+        that:
+          - (approved_remote_model_template.content | from_yaml).resources.server is defined
+          - (approved_remote_model_template.content | from_yaml).parameters.admin_ssh_public_key_blob.default is defined
+          - (approved_coreos_server_template.content | from_yaml).resources.server.type == 'OS::Nova::Server'
+        fail_msg: >-
+          The marketplace remote-model or Fedora CoreOS template is missing
+          required RGPU guard structure.
+
+    - name: Save immutable approved remote-model template snapshots
+      ansible.builtin.copy:
+        content: "{{ approved_remote_model_template.content }}"
+        dest: >-
+          {{ kolla_config_dir }}/config/nova/yggdrasil-approved-templates/remote_model_{{ approved_remote_model_template.content | hash('sha256') }}.yaml
+        mode: "0644"
+      register: approved_remote_model_template_file
+
+    - name: Save immutable approved Fedora CoreOS template snapshots
+      ansible.builtin.copy:
+        content: "{{ approved_coreos_server_template.content }}"
+        dest: >-
+          {{ kolla_config_dir }}/config/nova/yggdrasil-approved-templates/coreos_server_{{ approved_coreos_server_template.content | hash('sha256') }}.yaml
+        mode: "0644"
+      register: approved_coreos_server_template_file
+
+    - name: Configure Nova RGPU guard
+      ansible.builtin.blockinfile:
+        path: "{{ kolla_config_dir }}/config/nova.conf"
+        create: true
+        mode: "0640"
+        marker: "# {mark} YGGDRASIL NOVA RGPU GUARD"
+        block: |
+          [yggdrasil_rgpu_guard]
+          enabled = true
+          rgpu_flavor_ids = {{ rgpu_flavor_records.results | map(attribute='stdout') | map('trim') | join(',') }}
+          rgpu_flavor_names = {{ rgpu_flavors | join(',') }}
+          fcos_image_id = {{ (fcos_image_record.stdout | from_json).id }}
+          fcos_image_name = {{ fcos_image_name }}
+          trusted_heat_header = X-Yggdrasil-Heat-Authorization
+          trusted_heat_secret = {{ nova_rgpu_heat_secret }}
+          owner_metadata_key = yggdrasil_rgpu_owner_stack_id
+          managed_server_name_suffix = -remote-model-vm
+          keystone_url = {{ internal_keystone_url }}
+          heat_url = {{ internal_heat_url }}
+          reader_username = {{ rgpu_reader_username }}
+          reader_password_b64 = {{ rgpu_reader_password | b64encode }}
+          reader_user_domain = Default
+          reader_project_domain = Default
+          heat_timeout = 5
+          approved_template_directory = /etc/nova/yggdrasil-approved-templates
+      no_log: true
+      register: nova_guard_config
+
+    - name: Check whether Kolla has a custom HTTP frontend option list
+      ansible.builtin.set_fact:
+        ygg_haproxy_http_extra_exists: >-
+          {{ (lookup('file', kolla_config_dir ~ '/globals.yml') |
+              regex_search('(?m)^haproxy_frontend_http_extra:')) is not none }}
+
+    - name: Add guard-header sanitization to existing HAProxy frontend options
+      ansible.builtin.lineinfile:
+        path: "{{ kolla_config_dir }}/globals.yml"
+        regexp: '^\s+-\s+http-request del-header X-Yggdrasil-Heat-Authorization$'
+        line: '  - "http-request del-header X-Yggdrasil-Heat-Authorization"'
+        insertafter: '^haproxy_frontend_http_extra:$'
+        state: present
+      when: ygg_haproxy_http_extra_exists | bool
+      register: haproxy_header_sanitization_existing
+
+    - name: Configure default HAProxy frontend options with guard-header sanitization
+      ansible.builtin.blockinfile:
+        path: "{{ kolla_config_dir }}/globals.yml"
+        marker: "# {mark} YGGDRASIL NOVA RGPU HEADER SANITIZATION"
+        insertafter: EOF
+        block: |
+          haproxy_frontend_http_extra:
+            - option httplog
+            - option forwardfor
+            - http-request del-header X-Yggdrasil-Heat-Authorization
+      when: not (ygg_haproxy_http_extra_exists | bool)
+      register: haproxy_header_sanitization_new
+
+    - name: Configure Nova's private Heat-only HAProxy listener
+      ansible.builtin.template:
+        src: "{{ playbook_dir }}/../templates/nova_rgpu_heat_haproxy.cfg.j2"
+        dest: "{{ kolla_config_dir }}/config/haproxy/services.d/nova-rgpu-heat.cfg"
+        mode: "0640"
+      no_log: true
+      register: nova_heat_proxy_config
+
+    - name: Configure Heat to use Nova's private admin interface and scheduler hints
+      ansible.builtin.blockinfile:
+        path: "{{ kolla_config_dir }}/config/heat.conf"
+        create: true
+        mode: "0640"
+        marker: "# {mark} YGGDRASIL NOVA RGPU GUARD"
+        block: |
+          [DEFAULT]
+          stack_scheduler_hints = true
+
+          [clients_nova]
+          endpoint_type = admin
+      register: heat_guard_config
+
+    - name: Read the compute admin endpoint for this region
+      ansible.builtin.shell: >-
+        source workspace/kolla-venv/bin/activate &&
+        source workspace/etc/kolla/admin-openrc.sh &&
+        openstack endpoint list --service compute --interface admin --region {{ openstack_region }} -f value -c ID
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      register: nova_admin_endpoint
+      changed_when: false
+
+    - name: Create the private Nova admin endpoint when missing
+      ansible.builtin.shell: >-
+        source workspace/kolla-venv/bin/activate &&
+        source workspace/etc/kolla/admin-openrc.sh &&
+        openstack endpoint create --region {{ openstack_region }} compute admin {{ internal_nova_admin_url }}
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      when: nova_admin_endpoint.stdout | trim == ''
+
+    - name: Update the private Nova admin endpoint URL
+      ansible.builtin.shell: >-
+        source workspace/kolla-venv/bin/activate &&
+        source workspace/etc/kolla/admin-openrc.sh &&
+        openstack endpoint set --url {{ internal_nova_admin_url }} {{ nova_admin_endpoint.stdout_lines | first }}
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      when: nova_admin_endpoint.stdout | trim != ''
+      changed_when: false
+
+    - name: Reconfigure Nova, HAProxy, and Heat to activate the guard
+      ansible.builtin.command:
+        argv:
+          - "{{ playbook_dir }}/../../scripts/kolla-ansible/kolla-ansible.sh"
+          - reconfigure
+          - --tags
+          - nova,haproxy,heat
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+      when: >-
+        (nova_rgpu_force_reconfigure | default(false) | bool) or
+        nova_guard_config.changed or heat_guard_config.changed or
+        nova_heat_proxy_config.changed or
+        haproxy_header_sanitization_existing.changed | default(false) or
+        haproxy_header_sanitization_new.changed | default(false) or
+        approved_remote_model_template_file.changed or
+        approved_coreos_server_template_file.changed or
+        rgpu_flavors_prepare.changed
+      register: rgpu_reconfigure
+
+    - name: Verify the Heat-only Nova listener is responding
+      ansible.builtin.uri:
+        url: "http://{{ openstack_kolla_internal_vip_address }}:18775/"
+        method: GET
+        status_code: [200, 401, 404]
+        return_content: false
+        timeout: 10
+      delegate_to: "{{ groups['deployment_nodes'][0] }}"
+      when: >-
+        (nova_rgpu_force_reconfigure | default(false) | bool) or
+        nova_guard_config.changed or heat_guard_config.changed or
+        nova_heat_proxy_config.changed or
+        haproxy_header_sanitization_existing.changed | default(false) or
+        haproxy_header_sanitization_new.changed | default(false) or
+        approved_remote_model_template_file.changed or
+        approved_coreos_server_template_file.changed or
+        rgpu_flavors_prepare.changed
+
+    - name: Verify RGPU flavors remain available to Heat after guard activation
+      ansible.builtin.shell: >-
+        set -euo pipefail;
+        source workspace/kolla-venv/bin/activate;
+        source workspace/etc/kolla/admin-openrc.sh;
+        bash scripts/create_rgpu_flavors.sh
+      args:
+        chdir: "{{ playbook_dir }}/../.."
+        executable: /bin/bash
+      register: public_flavors
+      changed_when: '"Creating public flavor" in public_flavors.stdout'

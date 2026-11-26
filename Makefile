@@ -116,6 +116,11 @@ free-disk-space:
 openstack-opensearch-replicas:
 	ansible-playbook ansible/openstack_initialize/opensearch_replicas.yml $(VAULT_ARGS) $(ARGS)
 
+.PHONY: openstack-rgpu-guard
+openstack-rgpu-guard:
+	ansible-playbook -i ../yggdrasil_inventory/aio/ansible_inventory ansible/prepare_nova_api_rgpu_guard.yml $(VAULT_ARGS) $(ARGS)
+	ansible-playbook -i ../yggdrasil_inventory/aio/ansible_inventory ansible/openstack_initialize/nova_rgpu_guard.yml $(VAULT_ARGS) -e nova_rgpu_force_reconfigure=true $(ARGS)
+
 openstack-roles: kollaansible-postdeploy openstack-client-install
 	OPENSTACK_KOLLA_WORKSPACE="$(CURDIR)/workspace" \
 	OPENSTACK_ROLES="$(OPENSTACK_ROLES)" \
