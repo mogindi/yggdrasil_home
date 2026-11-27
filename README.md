@@ -424,6 +424,28 @@ and binary-log retention to one day. The Kolla defaults remain 2048 MiB and
    because they are dashboard,
    metrics, or compatibility APIs, rather than project-resource services.
 
+   For a Heat stack whose owner project was deleted, use the operator recovery
+   CLI. It restores the original project UUID when needed, then asks Heat to
+   remove the stack and its resources through the normal resource cleanup path.
+   Any restored project is deliberately left in place:
+
+   ```bash
+   scripts/openstack/recover-heat-stack.sh recover STACK_UUID
+   # Optional stages when investigating or retrying:
+   scripts/openstack/recover-heat-stack.sh restore-only STACK_UUID
+   scripts/openstack/recover-heat-stack.sh delete-only STACK_UUID
+   # Explicit project removal after cleanup and a complete empty inventory:
+   scripts/openstack/recover-heat-stack.sh cleanup-project PROJECT_UUID --yes
+   ```
+
+   To source the Kolla admin credentials with system scope in the current
+   shell, use `source scripts/openstack/admin-openrc-system-scope.sh`. The
+   helper accepts `OPENSTACK_KOLLA_WORKSPACE` and `OPENSTACK_RC` overrides.
+   Project cleanup is separate and explicit. It checks a strict resource
+   inventory and confirms through the Heat Engine that the project has no
+   active or nested stacks; it requires `--yes` before deleting the project.
+   A failed inventory or any remaining resource leaves the project untouched.
+
 10. **Operate and maintain**
     - Reconfigure services after variable updates:
       - `make kollaansible-reconfigure ENV=${ENV}`

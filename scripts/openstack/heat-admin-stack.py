@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Show or delete Heat stacks through the local Kolla Heat Engine RPC.
+"""Inspect or delete Heat stacks through the local Kolla Heat Engine RPC.
 
 Run this command as root on a controller that runs ``heat_engine``::
 
     scripts/openstack/heat-admin-stack.py show STACK_UUID
+    scripts/openstack/heat-admin-stack.py list-project PROJECT_UUID
     scripts/openstack/heat-admin-stack.py delete STACK_UUID
 
 The command runs its Heat RPC portion inside the Heat Engine container so it
@@ -90,6 +91,14 @@ def _stack_uuid(value: str) -> str:
         raise argparse.ArgumentTypeError("stack ID must be a UUID") from exc
 
 
+def _project_uuid(value: str) -> str:
+    try:
+        uuid.UUID(value)
+        return value.lower()
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise argparse.ArgumentTypeError("project ID must be a UUID") from exc
+
+
 def _positive_seconds(value: str) -> float:
     try:
         seconds = float(value)
@@ -111,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     show_parser = commands.add_parser("show", help="show a stack by UUID")
     show_parser.add_argument("stack_id", type=_stack_uuid)
+
+    list_parser = commands.add_parser(
+        "list-project", help="list active and nested stacks owned by a project UUID"
+    )
+    list_parser.add_argument("project_id", type=_project_uuid)
 
     delete_parser = commands.add_parser(
         "delete", help="delete a stack by UUID using Heat resource cleanup"
@@ -186,6 +200,41 @@ def _show_stack(
 ) -> int:
     details = _stack_details(rpc, context, identity)
     json.dump(details, stdout, indent=2, sort_keys=True, default=str)
+    stdout.write("\n")
+    return 0
+
+
+def _list_project_stacks(
+    rpc: Any,
+    context: Any,
+    project_id: str,
+    stdout: TextIO,
+) -> int:
+    result = rpc.list_stacks(
+        context,
+        filters={"tenant": project_id},
+        show_deleted=False,
+        show_nested=True,
+        show_hidden=True,
+    )
+    stacks: list[dict[str, str]] = []
+    for item in result:
+        raw_id = item.get("stack_identity") or item.get("id")
+        if isinstance(raw_id, Mapping):
+            raw_id = raw_id.get("stack_id")
+        if not raw_id:
+            raise RuntimeError("Heat returned a stack without an ID")
+        status = _status(item)
+        if status == "DELETE_COMPLETE":
+            continue
+        stacks.append(
+            {
+                "id": str(raw_id),
+                "name": str(item.get("stack_name") or ""),
+                "status": status,
+            }
+        )
+    json.dump(stacks, stdout, indent=2, sort_keys=True)
     stdout.write("\n")
     return 0
 
@@ -1154,6 +1203,19 @@ def _run_rpc_command(
     stderr = stderr or sys.stderr
     args = build_parser().parse_args(list(argv))
     injected_rpc_context = rpc is not None and context is not None
+
+    if args.command == "list-project":
+        try:
+            if rpc is None or context is None:
+                rpc, context = _initialize_heat_rpc()
+            return _list_project_stacks(rpc, context, args.project_id, stdout)
+        except Exception as exc:
+            print(
+                f"Unable to list Heat stacks for project {args.project_id}: "
+                f"{_exception_summary(exc)}",
+                file=stderr,
+            )
+            return 1
 
     try:
         if rpc is None or context is None:
