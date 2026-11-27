@@ -19,10 +19,12 @@ cleanup. For a deleted owner project, restore a temporary Keystone project
 with the original UUID on a Keystone node, then opt in to
 ``--recover-stale-credentials``. That mode uses Heat's versioned object API to
 remove an invalid stored trust credential before retrying the normal Heat
-resource deletion path. If that cleanup reaches a Heat stack user whose own
-project was deleted, it removes that unique, unassigned Heat-domain user so
-Heat's normal cleanup can continue. This is an operator-only interface to
-Heat internals, not a replacement for the public OpenStack API.
+resource deletion path. For a 403, it first verifies that none of the trust's
+delegated roles remain in the trustor's Keystone effective role assignments.
+If cleanup reaches a Heat stack user whose own project was deleted, it removes
+that unique, unassigned Heat-domain user so Heat's normal cleanup can continue.
+This is an operator-only interface to Heat internals, not a replacement for
+the public OpenStack API.
 """
 
 from __future__ import annotations
@@ -132,9 +134,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "if Heat cannot start deletion because a stored trust is invalid, "
             "remove that stale Heat credential record and retry using a "
-            "project-scoped admin token; after a default_project_id cleanup "
-            "failure, remove only verified orphaned Heat stack users and "
-            "retry; requires the owner project to exist"
+            "project-scoped admin token; for HTTP 403, recover only after "
+            "verifying the trustor has no delegated roles left; after a "
+            "default_project_id cleanup failure, remove only verified "
+            "orphaned Heat stack users and retry; requires the owner project "
+            "to exist"
         ),
     )
     return parser
@@ -221,6 +225,80 @@ def _is_unauthorized(exc: Exception) -> bool:
     )
 
 
+def _is_forbidden(exc: Exception) -> bool:
+    exc_type = str(getattr(exc, "exc_type", "")).lower()
+    summary = _exception_summary(exc).lower()
+    return (
+        "forbidden" in exc_type
+        or "forbidden" in summary
+        or "http 403" in summary
+    )
+
+
+def _resource_value(resource: Any, name: str) -> Any:
+    if isinstance(resource, Mapping):
+        return resource.get(name)
+    return getattr(resource, name, None)
+
+
+def _resource_id(resource: Any) -> str | None:
+    if isinstance(resource, str):
+        return resource or None
+    value = _resource_value(resource, "id")
+    return str(value) if value else None
+
+
+def _require_missing_delegated_trust_roles(
+    system_admin: SystemAdminAuth,
+    trust_id: str,
+    project_id: str,
+) -> None:
+    """Verify the specific Keystone 403 caused by a stale Heat trust.
+
+    Keystone requires a trustor to retain every role delegated by a trust.
+    Effective role assignments include Keystone's implied-role hierarchy, so
+    an admin -> member implication is honored by this comparison. Any
+    uncertainty fails closed before the stored Heat credential is changed.
+    """
+    trust = system_admin.identity.trusts.get(trust_id)
+    trust_project_id = _resource_value(trust, "project_id")
+    trustor_user_id = _resource_value(trust, "trustor_user_id")
+    if str(trust_project_id or "") != project_id or not trustor_user_id:
+        raise RuntimeError(
+            "cannot verify stale-trust recovery: the stored trust does not "
+            "match the stack project or has no trustor"
+        )
+
+    delegated_roles = _resource_value(trust, "roles") or ()
+    delegated_role_ids = set()
+    for role in delegated_roles:
+        role_id = _resource_id(role)
+        if role_id is not None:
+            delegated_role_ids.add(role_id)
+    if not delegated_role_ids:
+        raise RuntimeError(
+            "cannot verify stale-trust recovery: the stored trust has no "
+            "delegated role IDs"
+        )
+
+    assignments = system_admin.identity.role_assignments.list(
+        user=str(trustor_user_id),
+        project=project_id,
+        effective=True,
+    )
+    effective_role_ids = set()
+    for assignment in assignments:
+        role_id = _resource_id(_resource_value(assignment, "role"))
+        if role_id is not None:
+            effective_role_ids.add(role_id)
+    still_delegated_role_ids = delegated_role_ids & effective_role_ids
+    if still_delegated_role_ids:
+        raise RuntimeError(
+            "refusing stale-trust recovery: Keystone's effective role "
+            "assignments still include a role delegated by the trust"
+        )
+
+
 def _recover_stale_credentials(
     heat_context: Any,
     identity: Mapping[str, Any],
@@ -231,14 +309,17 @@ def _recover_stale_credentials(
     user_creds_objects: Any | None = None,
     heat_not_found: type[Exception] | None = None,
     keystone_not_found: type[Exception] | None = None,
+    require_missing_delegated_roles: bool = False,
 ) -> None:
     """Detach a revoked trust credential so Heat can delete as project admin.
 
     Heat's RPC delete loads the old stored context before it schedules resource
-    cleanup. If that trust is invalid, the load fails with HTTP 401. After
-    revoking the trust if it still exists, remove its Heat UserCreds object and
-    clear the stack's reference while holding a Heat stack lock. The caller
-    then retries Heat's ordinary delete RPC with a project-scoped admin token.
+    cleanup. If that trust is invalid, the load can fail with HTTP 401. A 403
+    recovery also requires proof that the trustor has lost a delegated role.
+    After revoking the trust if it still exists, remove its Heat UserCreds
+    object and clear the stack's reference while holding a Heat stack lock.
+    The caller then retries Heat's ordinary delete RPC with a project-scoped
+    admin token.
     """
     if any(
         value is None
@@ -304,11 +385,23 @@ def _recover_stale_credentials(
         except heat_not_found:
             user_creds = None
 
+        if user_creds is None and require_missing_delegated_roles:
+            raise RuntimeError(
+                "cannot verify stale-trust recovery: Heat has no stored "
+                "credential record for this stack"
+            )
+
         if user_creds is not None:
             trust_id = user_creds.trust_id
             if not trust_id:
                 raise RuntimeError(
                     "stored credentials are not a trust; refusing to clear them"
+                )
+            if require_missing_delegated_roles:
+                _require_missing_delegated_trust_roles(
+                    system_admin,
+                    trust_id,
+                    str(identity["tenant"]),
                 )
             try:
                 system_admin.identity.trusts.delete(trust_id)
@@ -515,6 +608,7 @@ def _delete_stack(
     delete_context: Any | None,
     prepare_delete_context: Callable[[], DeleteAuth] | None = None,
     recover_stale_credentials: Callable[[], None] | None = None,
+    recover_forbidden_stale_credentials: Callable[[], None] | None = None,
     cleanup_orphaned_heat_users: Callable[[Any, str], list[str]] | None = None,
     yes: bool,
     timeout: float,
@@ -615,6 +709,24 @@ def _delete_stack(
                                 print(
                                     "Detached stale Heat credentials; retrying "
                                     "normal Heat resource deletion with project admin.",
+                                    file=stdout,
+                                )
+                                rpc.delete_stack(delete_auth.context, identity)
+                            except Exception as recovery_exc:
+                                start_error = recovery_exc
+                            else:
+                                start_error = None
+                        elif (
+                            recover_forbidden_stale_credentials
+                            and _is_forbidden(exc)
+                        ):
+                            try:
+                                recover_forbidden_stale_credentials()
+                                print(
+                                    "Verified the trustor has no delegated "
+                                    "roles left on the stored Heat trust; "
+                                    "retrying normal Heat resource deletion "
+                                    "with project admin.",
                                     file=stdout,
                                 )
                                 rpc.delete_stack(delete_auth.context, identity)
@@ -1069,6 +1181,7 @@ def _run_rpc_command(
     delete_context = context if injected_rpc_context else None
     prepare_delete_context = None
     recover_stale_credentials = None
+    recover_forbidden_stale_credentials = None
     cleanup_orphaned_heat_users = None
     if not injected_rpc_context:
         try:
@@ -1108,6 +1221,12 @@ def _run_rpc_command(
             identity,
             system_admin,
         )
+        recover_forbidden_stale_credentials = lambda: _recover_stale_credentials(
+            context,
+            identity,
+            system_admin,
+            require_missing_delegated_roles=True,
+        )
         cleanup_orphaned_heat_users = lambda keystone_context, resource_name: (
             _cleanup_orphaned_heat_stack_users(
                 context,
@@ -1124,6 +1243,7 @@ def _run_rpc_command(
         delete_context=delete_context,
         prepare_delete_context=prepare_delete_context,
         recover_stale_credentials=recover_stale_credentials,
+        recover_forbidden_stale_credentials=recover_forbidden_stale_credentials,
         cleanup_orphaned_heat_users=cleanup_orphaned_heat_users,
         yes=args.yes,
         timeout=args.timeout,
