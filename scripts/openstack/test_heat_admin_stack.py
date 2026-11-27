@@ -57,6 +57,17 @@ class FakeRPC:
             item = self.statuses[0]
         return [item]
 
+    def list_stacks(self, context, **kwargs):
+        self.listed = (context, kwargs)
+        return [
+            {
+                "id": {"stack_id": STACK_ID},
+                "stack_name": STACK_NAME,
+                "stack_action": "CREATE",
+                "stack_status": "COMPLETE",
+            }
+        ]
+
     def delete_stack(self, context, identity):
         self.deleted.append((context, identity))
 
@@ -99,6 +110,71 @@ class ShowTests(unittest.TestCase):
         self.assertEqual(details["stack_name"], STACK_NAME)
         self.assertEqual(details["stack_status"], "CREATE_FAILED")
         self.assertEqual(details["stack_status_reason"], "Timed out")
+
+
+class ProjectListTests(unittest.TestCase):
+    def test_project_uuid_format_is_preserved_for_rpc_filtering(self):
+        project_id = "88a8b0838f534961a703aa0dd42e7536"
+
+        args = admin_stack.build_parser().parse_args(["list-project", project_id])
+
+        self.assertEqual(args.project_id, project_id)
+
+    def test_list_project_reports_nested_stack_summaries(self):
+        rpc = FakeRPC([])
+        output = io.StringIO()
+        errors = io.StringIO()
+
+        result = admin_stack._run_rpc_command(
+            ["list-project", PROJECT_ID],
+            rpc=rpc,
+            context="admin-context",
+            stdout=output,
+            stderr=errors,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(errors.getvalue(), "")
+        self.assertEqual(json.loads(output.getvalue()), [{
+            "id": STACK_ID,
+            "name": STACK_NAME,
+            "status": "CREATE_COMPLETE",
+        }])
+        self.assertEqual(rpc.listed[0], "admin-context")
+        self.assertEqual(
+            rpc.listed[1],
+            {
+                "filters": {"tenant": PROJECT_ID},
+                "show_deleted": False,
+                "show_nested": True,
+                "show_hidden": True,
+            },
+        )
+
+    def test_list_project_excludes_delete_complete_tombstones(self):
+        rpc = FakeRPC([])
+        rpc.list_stacks = mock.Mock(
+            return_value=[
+                {
+                    "id": {"stack_id": STACK_ID},
+                    "stack_name": STACK_NAME,
+                    "stack_action": "DELETE",
+                    "stack_status": "COMPLETE",
+                }
+            ]
+        )
+        output = io.StringIO()
+
+        result = admin_stack._run_rpc_command(
+            ["list-project", PROJECT_ID],
+            rpc=rpc,
+            context="admin-context",
+            stdout=output,
+            stderr=io.StringIO(),
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue()), [])
 
 
 class DeleteTests(unittest.TestCase):
