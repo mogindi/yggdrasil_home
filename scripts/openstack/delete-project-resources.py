@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -616,13 +618,97 @@ def wait_for_stack_delete(
     return f"stack remained visible after {timeout:.0f} seconds"
 
 
+def delete_heat_stack_via_admin_helper(
+    stack_id: str,
+    *,
+    ssh_target: str,
+    ssh_key_file: str,
+    known_hosts_file: str,
+) -> tuple[bool, str]:
+    """Run the guarded Heat operator helper through its restricted SSH key."""
+    if not re.fullmatch(r"[A-Za-z0-9_.@-]+", ssh_target) or ssh_target.startswith("-"):
+        return False, "invalid HEAT_ADMIN_STACK_SSH_TARGET"
+    try:
+        stack_uuid = str(uuid.UUID(stack_id))
+    except (ValueError, AttributeError, TypeError):
+        return False, f"Heat stack ID is not a UUID: {stack_id}"
+
+    if not Path(ssh_key_file).is_file():
+        return False, f"Heat cleanup SSH key does not exist: {ssh_key_file}"
+    if not Path(known_hosts_file).is_file():
+        return False, (
+            "Heat cleanup SSH known-hosts file does not exist: "
+            f"{known_hosts_file}"
+        )
+
+    try:
+        completed = subprocess.run(
+            [
+                "ssh",
+                "-i",
+                ssh_key_file,
+                "-o",
+                f"UserKnownHostsFile={known_hosts_file}",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "PreferredAuthentications=publickey",
+                "-o",
+                "ConnectTimeout=15",
+                "--",
+                ssh_target,
+                "delete",
+                stack_uuid,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        return False, f"Unable to start SSH for Heat cleanup: {exc}"
+    output = "\n".join(
+        value for value in (completed.stdout, completed.stderr) if value
+    ).strip()
+    if completed.returncode == 0:
+        return True, output
+    return False, output or f"SSH exited with code {completed.returncode}"
+
+
 def execute_plan(
     operations: Iterable[Operation],
     *,
     openstack_bin: str,
     wait_seconds: float = DEFAULT_WAIT_SECONDS,
     poll_seconds: float = DEFAULT_POLL_SECONDS,
+    heat_admin_stack_ssh_target: str | None = None,
+    heat_admin_stack_ssh_key_file: str | None = None,
+    heat_admin_stack_known_hosts_file: str | None = None,
 ) -> list[str]:
+    heat_admin_stack_ssh_target = (
+        heat_admin_stack_ssh_target
+        if heat_admin_stack_ssh_target is not None
+        else os.environ.get("HEAT_ADMIN_STACK_SSH_TARGET", "")
+    )
+    heat_admin_stack_ssh_key_file = (
+        heat_admin_stack_ssh_key_file
+        if heat_admin_stack_ssh_key_file is not None
+        else os.environ.get(
+            "HEAT_ADMIN_STACK_SSH_KEY_FILE",
+            "/config/heat-admin-stack-ssh-key",
+        )
+    )
+    heat_admin_stack_known_hosts_file = (
+        heat_admin_stack_known_hosts_file
+        if heat_admin_stack_known_hosts_file is not None
+        else os.environ.get(
+            "HEAT_ADMIN_STACK_SSH_KNOWN_HOSTS_FILE",
+            "/config/heat-admin-stack-known-hosts",
+        )
+    )
     errors: list[str] = []
     clustering = None
     for operation in operations:
@@ -658,7 +744,25 @@ def execute_plan(
         if resource.resource == "router":
             errors.extend(delete_router(openstack_bin, resource))
             continue
-        ok, detail = _run_openstack(openstack_bin, operation.argv)
+        if (
+            resource.service == "orchestration"
+            and resource.resource == "stack"
+            and heat_admin_stack_ssh_target
+        ):
+            print(
+                "Using the restricted Heat admin helper for stack deletion "
+                f"{resource.identifier}."
+            )
+            ok, detail = delete_heat_stack_via_admin_helper(
+                resource.identifier,
+                ssh_target=heat_admin_stack_ssh_target,
+                ssh_key_file=heat_admin_stack_ssh_key_file,
+                known_hosts_file=heat_admin_stack_known_hosts_file,
+            )
+            if detail:
+                print(detail, file=sys.stdout if ok else sys.stderr)
+        else:
+            ok, detail = _run_openstack(openstack_bin, operation.argv)
         if not ok:
             errors.append(
                 f"{resource.service}/{resource.resource}/{resource.identifier}: {detail}"
