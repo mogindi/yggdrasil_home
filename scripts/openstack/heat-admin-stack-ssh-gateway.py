@@ -2,8 +2,8 @@
 """Restricted SSH forced-command gateway for scheduled Heat stack deletion.
 
 Install this as the ``command=`` for a dedicated SSH key. It accepts only
-``delete STACK_UUID`` through ``SSH_ORIGINAL_COMMAND`` and always enables the
-Heat helper's guarded stale-trust recovery path.
+``delete PROJECT_UUID STACK_UUID`` through ``SSH_ORIGINAL_COMMAND`` and always
+enables the Heat helper's guarded stale-trust recovery path.
 """
 
 from __future__ import annotations
@@ -27,12 +27,17 @@ def main(environ: Mapping[str, str] | None = None) -> int:
         command = shlex.split(environ.get("SSH_ORIGINAL_COMMAND", ""))
     except ValueError:
         command = []
-    if len(command) != 2 or command[0] != "delete":
-        print("Only 'delete STACK_UUID' is allowed.", file=sys.stderr)
+    if len(command) != 3 or command[0] != "delete":
+        print("Only 'delete PROJECT_UUID STACK_UUID' is allowed.", file=sys.stderr)
         return 2
 
     try:
-        stack_id = str(uuid.UUID(command[1]))
+        project_id = str(uuid.UUID(command[1]))
+    except (ValueError, AttributeError, TypeError):
+        print("Project ID must be a UUID.", file=sys.stderr)
+        return 2
+    try:
+        stack_id = str(uuid.UUID(command[2]))
     except (ValueError, AttributeError, TypeError):
         print("Stack ID must be a UUID.", file=sys.stderr)
         return 2
@@ -59,6 +64,8 @@ def main(environ: Mapping[str, str] | None = None) -> int:
                 str(helper),
                 "delete",
                 stack_id,
+                "--project-id",
+                project_id,
                 "--yes",
                 "--recover-stale-credentials",
             ]

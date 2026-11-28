@@ -99,6 +99,13 @@ def _project_uuid(value: str) -> str:
         raise argparse.ArgumentTypeError("project ID must be a UUID") from exc
 
 
+def _same_uuid(left: object, right: object) -> bool:
+    try:
+        return uuid.UUID(str(left)) == uuid.UUID(str(right))
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 def _positive_seconds(value: str) -> float:
     try:
         seconds = float(value)
@@ -130,6 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
         "delete", help="delete a stack by UUID using Heat resource cleanup"
     )
     delete_parser.add_argument("stack_id", type=_stack_uuid)
+    delete_parser.add_argument(
+        "--project-id",
+        type=_project_uuid,
+        help="require the stack to belong to this project UUID",
+    )
     delete_parser.add_argument(
         "--yes",
         action="store_true",
@@ -1225,6 +1237,16 @@ def _run_rpc_command(
         print(
             f"Unable to resolve Heat stack {args.stack_id}: "
             f"{_exception_summary(exc)}",
+            file=stderr,
+        )
+        return 1
+
+    if args.command == "delete" and args.project_id and not _same_uuid(
+        identity.get("tenant"), args.project_id
+    ):
+        print(
+            f"Refusing to delete Heat stack {args.stack_id}: it does not belong "
+            f"to project {args.project_id}.",
             file=stderr,
         )
         return 1

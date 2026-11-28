@@ -51,6 +51,7 @@ class PlanningTests(unittest.TestCase):
                 },
                 "application-container": {"container": [{"uuid": "container-1"}]},
                 "orchestration": {"stack": [{"id": "stack-1"}]},
+                "load-balancer": {"load_balancer": [{"id": "lb-1"}]},
                 "workflow": {
                     "workflow": [{"id": "workflow-1"}],
                     "execution": [{"id": "execution-1"}],
@@ -71,6 +72,7 @@ class PlanningTests(unittest.TestCase):
                 ("workflow", "workflow-1"),
                 ("stack", "stack-1"),
                 ("container", "container-1"),
+                ("load_balancer", "lb-1"),
                 ("server", "server-1"),
                 ("snapshot", "snapshot-1"),
                 ("backup", "backup-1"),
@@ -249,6 +251,72 @@ class PlanningTests(unittest.TestCase):
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_restricted_heat_helper_receives_project_and_stack_uuids(self):
+        project_id = "88a8b083-8f53-4961-a703-aa0dd42e7536"
+        stack_id = "aad0e9d2-ac8d-4094-a484-6c09409e4b8f"
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            key_file = Path(temporary_directory) / "heat-admin-key"
+            known_hosts_file = Path(temporary_directory) / "known_hosts"
+            key_file.write_text("private key placeholder", encoding="utf-8")
+            known_hosts_file.write_text("controller ssh-ed25519 key", encoding="utf-8")
+            completed = mock.Mock(returncode=0, stdout="", stderr="")
+            with mock.patch.object(
+                deleter.subprocess, "run", return_value=completed
+            ) as run:
+                ok, detail = deleter.delete_heat_stack_via_admin_helper(
+                    stack_id,
+                    project_id=project_id,
+                    ssh_target="root@10.0.0.10",
+                    ssh_key_file=str(key_file),
+                    known_hosts_file=str(known_hosts_file),
+                )
+
+        self.assertTrue(ok)
+        self.assertEqual(detail, "")
+        command = run.call_args.args[0]
+        self.assertEqual(command[-3:], ["delete", project_id, stack_id])
+
+    def test_required_heat_helper_blocks_before_any_resource_deletion(self):
+        report = report_with_resources(
+            {
+                "orchestration": {
+                    "stack": [
+                        {"id": "aad0e9d2-ac8d-4094-a484-6c09409e4b8f"}
+                    ]
+                }
+            }
+        )
+        report["project"]["id"] = "88a8b083-8f53-4961-a703-aa0dd42e7536"
+        with mock.patch.dict(os.environ, {"HEAT_ADMIN_STACK_SSH_TARGET": ""}):
+            with mock.patch.object(deleter, "execute_plan") as execute_plan:
+                with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(report))):
+                    with redirect_stderr(io.StringIO()) as stderr:
+                        result = deleter.main(
+                            ["-", "--yes", "--require-heat-admin-helper"]
+                        )
+
+        self.assertEqual(result, 2)
+        self.assertIn("refusing to fall back", stderr.getvalue())
+        execute_plan.assert_not_called()
+
+    def test_dry_run_does_not_require_heat_helper_credentials(self):
+        report = report_with_resources(
+            {
+                "orchestration": {
+                    "stack": [
+                        {"id": "aad0e9d2-ac8d-4094-a484-6c09409e4b8f"}
+                    ]
+                }
+            }
+        )
+        with mock.patch.dict(os.environ, {"HEAT_ADMIN_STACK_SSH_TARGET": ""}):
+            with mock.patch.object(sys, "stdin", io.StringIO(json.dumps(report))):
+                with redirect_stdout(io.StringIO()) as stdout:
+                    result = deleter.main(["-", "--require-heat-admin-helper"])
+
+        self.assertEqual(result, 0)
+        self.assertIn("Dry run", stdout.getvalue())
+
     def _run_project_cleanup(
         self,
         reports,
@@ -417,6 +485,13 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(
             deleter._missing_output(
                 "Router router-1 does not have an interface with id port-1"
+            )
+        )
+
+    def test_load_balancer_removed_with_heat_stack_is_treated_as_missing(self):
+        self.assertTrue(
+            deleter._missing_output(
+                "Unable to locate lb-1 in loadbalancers"
             )
         )
 

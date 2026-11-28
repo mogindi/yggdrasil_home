@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -518,7 +519,7 @@ def _missing_output(output: str) -> bool:
     text = output.casefold()
     return bool(
         re.search(
-            r"not found|no .* found|404 not found|does not exist|could not be found|"
+            r"not found|unable to locate|no .* found|404 not found|does not exist|could not be found|"
             r"does not have an interface",
             text,
         )
@@ -621,6 +622,7 @@ def wait_for_stack_delete(
 def delete_heat_stack_via_admin_helper(
     stack_id: str,
     *,
+    project_id: str,
     ssh_target: str,
     ssh_key_file: str,
     known_hosts_file: str,
@@ -632,6 +634,10 @@ def delete_heat_stack_via_admin_helper(
         stack_uuid = str(uuid.UUID(stack_id))
     except (ValueError, AttributeError, TypeError):
         return False, f"Heat stack ID is not a UUID: {stack_id}"
+    try:
+        project_uuid = str(uuid.UUID(project_id))
+    except (ValueError, AttributeError, TypeError):
+        return False, f"Heat stack owner project ID is not a UUID: {project_id}"
 
     if not Path(ssh_key_file).is_file():
         return False, f"Heat cleanup SSH key does not exist: {ssh_key_file}"
@@ -662,6 +668,7 @@ def delete_heat_stack_via_admin_helper(
                 "--",
                 ssh_target,
                 "delete",
+                project_uuid,
                 stack_uuid,
             ],
             capture_output=True,
@@ -684,6 +691,7 @@ def execute_plan(
     openstack_bin: str,
     wait_seconds: float = DEFAULT_WAIT_SECONDS,
     poll_seconds: float = DEFAULT_POLL_SECONDS,
+    project_id: str | None = None,
     heat_admin_stack_ssh_target: str | None = None,
     heat_admin_stack_ssh_key_file: str | None = None,
     heat_admin_stack_known_hosts_file: str | None = None,
@@ -755,6 +763,7 @@ def execute_plan(
             )
             ok, detail = delete_heat_stack_via_admin_helper(
                 resource.identifier,
+                project_id=project_id or "",
                 ssh_target=heat_admin_stack_ssh_target,
                 ssh_key_file=heat_admin_stack_ssh_key_file,
                 known_hosts_file=heat_admin_stack_known_hosts_file,
@@ -991,6 +1000,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Refresh the inventory after deletion and fail if any resources remain.",
     )
     parser.add_argument(
+        "--require-heat-admin-helper",
+        action="store_true",
+        help=(
+            "refuse deletion before starting if the inventory contains a Heat "
+            "stack and the restricted Heat admin SSH helper is not configured"
+        ),
+    )
+    parser.add_argument(
         "--wait-seconds",
         type=float,
         default=DEFAULT_WAIT_SECONDS,
@@ -1003,6 +1020,61 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Heat stack status polling interval (default: {DEFAULT_POLL_SECONDS:g}).",
     )
     return parser
+
+
+def _project_id(report: Mapping[str, Any]) -> str | None:
+    project = report.get("project")
+    if not isinstance(project, Mapping):
+        return None
+    value = _scalar_text(project.get("id") or project.get("project_id"))
+    return value or None
+
+
+def _heat_admin_helper_configuration_error(
+    operations: Sequence[Operation],
+    *,
+    required: bool,
+    project_id: str | None,
+) -> str | None:
+    has_heat_stack = any(
+        operation.resource.service == "orchestration"
+        and operation.resource.resource == "stack"
+        for operation in operations
+    )
+    if not has_heat_stack:
+        return None
+
+    target = os.environ.get("HEAT_ADMIN_STACK_SSH_TARGET", "")
+    if not target:
+        if required:
+            return (
+                "Heat stack deletion requires HEAT_ADMIN_STACK_SSH_TARGET; "
+                "refusing to fall back to the OpenStack CLI"
+            )
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9_.@-]+", target) or target.startswith("-"):
+        return "invalid HEAT_ADMIN_STACK_SSH_TARGET"
+    if not project_id:
+        return "Heat admin helper requires the inventory project UUID"
+    try:
+        uuid.UUID(project_id)
+    except (ValueError, AttributeError, TypeError):
+        return f"Heat admin helper project ID is not a UUID: {project_id}"
+
+    key_file = os.environ.get(
+        "HEAT_ADMIN_STACK_SSH_KEY_FILE", "/config/heat-admin-stack-ssh-key"
+    )
+    known_hosts_file = os.environ.get(
+        "HEAT_ADMIN_STACK_SSH_KNOWN_HOSTS_FILE",
+        "/config/heat-admin-stack-known-hosts",
+    )
+    if not Path(key_file).is_file():
+        return f"Heat cleanup SSH key does not exist: {key_file}"
+    if not Path(known_hosts_file).is_file():
+        return f"Heat cleanup SSH known-hosts file does not exist: {known_hosts_file}"
+    if shutil.which("ssh") is None:
+        return "SSH is required for Heat admin stack cleanup"
+    return None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1047,6 +1119,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if issues:
             raise DeletePlanError("refusing to delete: " + "; ".join(issues))
 
+        project_id = _project_id(report)
+        if args.yes:
+            helper_error = _heat_admin_helper_configuration_error(
+                operations,
+                required=args.require_heat_admin_helper,
+                project_id=project_id,
+            )
+            if helper_error:
+                raise DeletePlanError(helper_error)
+
         if not operations:
             print("No deletable project resources found.")
             return 0
@@ -1065,6 +1147,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             openstack_bin=args.openstack_bin,
             wait_seconds=args.wait_seconds,
             poll_seconds=args.poll_seconds,
+            project_id=project_id,
         )
         if errors:
             for error in errors:

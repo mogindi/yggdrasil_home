@@ -185,6 +185,50 @@ class DeleteTests(unittest.TestCase):
 
         self.assertTrue(args.recover_stale_credentials)
 
+    def test_project_guard_refuses_a_stack_owned_by_another_project(self):
+        rpc = FakeRPC([stack_details("CREATE", "COMPLETE")])
+        rpc.identify_stack = mock.Mock(
+            return_value={
+                "tenant": "b6e624f1-a37a-4c91-a3e4-00dc798e69c2",
+                "stack_name": STACK_NAME,
+                "stack_id": STACK_ID,
+                "path": "",
+            }
+        )
+        errors = io.StringIO()
+
+        result = admin_stack._run_rpc_command(
+            ["delete", STACK_ID, "--project-id", PROJECT_ID, "--yes"],
+            rpc=rpc,
+            context="admin-context",
+            stdout=io.StringIO(),
+            stderr=errors,
+        )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(rpc.deleted, [])
+        self.assertIn("does not belong to project", errors.getvalue())
+
+    def test_project_guard_allows_the_identified_owner(self):
+        rpc = FakeRPC(
+            [
+                stack_details("CREATE", "FAILED"),
+                stack_details("DELETE", "COMPLETE"),
+            ]
+        )
+        result = admin_stack._run_rpc_command(
+            ["delete", STACK_ID, "--project-id", PROJECT_ID, "--yes"],
+            rpc=rpc,
+            context="admin-context",
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+            sleep=lambda _seconds: None,
+            monotonic=lambda: 0.0,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(len(rpc.deleted), 1)
+
     def test_delete_requires_typed_uuid_when_interactive(self):
         rpc = FakeRPC([stack_details("CREATE", "FAILED")])
         output = io.StringIO()
